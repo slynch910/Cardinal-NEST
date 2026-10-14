@@ -193,9 +193,6 @@ cardinal-nest-shiny/
 
 Bug reports and feature requests are welcome through [GitHub Issues](https://github.com/slynch910/Cardinal-NEST/issues). Please include your operating system, R version, and the relevant part of `logs/app.log`.
 
-## License
-
-Artistic-2.0
 
 ## Acknowledgments
 
