@@ -35,9 +35,16 @@ Then, from an R session started **in the `Cardinal-NEST` folder**:
 
 ```r
 install.packages("renv")
-renv::activate()             # creates a project-private library for this folder
-renv::restore(prompt = FALSE) # installs the exact versions in renv.lock
+renv::activate()  # creates a project-private library for this folder
 ```
+
+**Restart R** (or start a new R session in the `Cardinal-NEST` folder), then:
+
+```r
+renv::restore(prompt = FALSE)  # installs the exact versions in renv.lock
+```
+
+The restart matters: if `restore()` runs in the same session as `activate()`, the project library is not yet active and restore can incorrectly report "already synchronized" while installing nothing.
 
 The first restore compiles some packages and can take a while. Packages go into the project library, not your personal R library. Any R session started in this folder uses that library automatically.
 

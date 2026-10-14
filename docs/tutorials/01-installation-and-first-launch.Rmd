@@ -44,9 +44,16 @@ From an R session started in the `Cardinal-NEST` folder:
 ```{r install}
 install.packages("renv")
 renv::activate()
+```
+
+Then **restart R** in the same folder and run:
+
+```{r restore}
 renv::restore(prompt = FALSE)
 ```
 
+The restart matters: `restore()` run in the same session as `activate()` can
+incorrectly report the library as synchronized while installing nothing.
 The first restore can take a while because some packages are compiled from
 source. Any later R session started in this folder uses the project library
 automatically.
