@@ -1,0 +1,39 @@
+# R specific
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Package build artifacts
+*.tar.gz
+*.rds
+
+# Shiny specific
+rsconnect/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation build
+docs/_site/
+docs/.Rproj.user
+
+# Test artifacts
+tests/testthat/*.rdb
+tests/testthat/*.rdx
+
+# Temporary files
+*.tmp
+*.bak
+
+# Non-commit documentation
+noncommit-docs/

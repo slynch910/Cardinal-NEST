@@ -1,0 +1,132 @@
+---
+title: "Importing Your First Dataset"
+author: "Cardinal NEST"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+vignette: >
+  %\VignetteIndexEntry{Importing Your First Dataset}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# Overview
+
+The **Import** tab is where every analysis begins. This vignette covers the
+supported file formats, single- and multi-file uploads, folder (bulk) import,
+the advanced mass-range and resolution filters, and the choice between in-memory
+and file-backed storage.
+
+**Audience:** New users.
+
+# Supported formats
+
+| Format | Files | Notes |
+|--------|-------|-------|
+| imzML | `.imzML` + `.ibd` | The standard MSI interchange format. |
+| Analyze 7.5 | `.hdr` + `.img` + `.t2m` | Legacy format; all three files required. |
+| CSV / Tabular | `.csv`, `.txt`, `.tsv` | One dataset per file. |
+
+Files that share a base name are grouped into a single dataset automatically
+(e.g., `sample1.imzML` + `sample1.ibd`).
+
+# Import a single imzML dataset
+
+1. Open the **Import** tab and set **File Format** to `imzML`.
+2. Click the file chooser and select **both** `test_sample.imzML` and
+   `test_sample.ibd` from `tests/testdata/test_sample.imzML/`.
+3. Click **Import**.
+
+The status area reports success, the dataset appears in the switcher, and it
+becomes the active dataset. The equivalent Cardinal call is:
+
+```{r read-imzml}
+library(Cardinal)
+mse <- readMSIData("tests/testdata/test_sample.imzML/test_sample.imzML")
+mse
+```
+
+# Import an Analyze 7.5 dataset
+
+1. Set **File Format** to `Analyze 7.5`.
+2. Select all three files from `tests/testdata/test_sample_analyze/`:
+   `test_sample_analyze.hdr`, `.img`, and `.t2m`.
+3. Click **Import**.
+
+You should see 64 pixels and 1470 features in **Explore**. If you need to
+regenerate this sample dataset:
+
+```{r make-analyze, engine='bash'}
+Rscript tests/testdata/make_analyze_sample.R
+```
+
+# Import a CSV / tabular dataset
+
+1. Set **File Format** to `CSV/Tabular`.
+2. Choose a file where rows are pixels and columns are m/z values (or your
+   project's expected layout).
+3. Click **Import** and confirm the pixel/feature counts in **Explore**.
+
+# Multi-file upload
+
+To import several datasets at once, select all of their files together in the
+chooser. Cardinal NEST groups them by base name, so two imzML/ibd pairs become
+two datasets in a single action. The **import status summary** reports how many
+datasets were imported versus failed, and the **import history** table logs one
+row per attempt.
+
+# Folder (bulk) import
+
+For larger studies you can point the app at a folder instead of selecting files
+by hand.
+
+1. Enter a folder path (e.g., `tests/testdata`) in the folder-import field.
+2. Set the matching **File Format**.
+3. (Optional) Enable the **recursive** option to scan subfolders.
+4. Click the folder-scan/import button.
+
+Every detected dataset group is imported. An empty or invalid folder produces a
+clear "no files detected" message rather than an error.
+
+# Advanced settings (imzML)
+
+Expand **Advanced settings** to filter data at import time — useful for trimming
+large files down to a region of interest.
+
+- **Mass range** — restrict the retained m/z window, e.g. `min = 600`,
+  `max = 800`. The imported dataset's m/z range is clamped accordingly. Setting
+  `min >= max` is rejected with a validation message.
+- **Resolution** — control the feature spacing/binning.
+
+```{r read-filtered}
+mse <- readMSIData(
+  "tests/testdata/test_sample.imzML/test_sample.imzML",
+  mass.range = c(600, 800),
+  resolution = 100
+)
+```
+
+# In-memory vs file-backed storage
+
+Also under advanced settings is the storage mode:
+
+- **In-memory** — spectra live in RAM. Fastest for analysis, but limited by
+  available memory.
+- **File-backed (shared memory)** — spectra stay on disk and are read on demand.
+  Ideal for datasets larger than RAM.
+
+You can always convert a file-backed dataset to in-memory later from the
+**Performance** tab. The Performance memory table shows each dataset's storage
+mode and estimated size.
+
+# What next?
+
+With data imported, head to
+[Exploring and Editing Metadata](03-exploring-and-editing-metadata.html) to
+inspect pixel and feature annotations and to create grouping variables for
+downstream analysis.

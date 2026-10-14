@@ -1,0 +1,34 @@
+Package: CardinalNEST
+Type: Package
+Title: A Graphical User Interface for Cardinal 3
+Version: 0.2.0
+Date: 2026-10-14
+Authors@R: 
+    person(given = "Your",
+           family = "Name",
+           role = c("aut", "cre"),
+           email = "your.email@example.com")
+Description: A user-friendly Shiny-based graphical interface for mass spectrometry 
+    imaging (MSI) data analysis using the Cardinal 3 package. Cardinal NEST provides 
+    visual workflows for data import, preprocessing, visualization, and statistical 
+    analysis without requiring R programming expertise.
+License: Artistic-2.0
+Depends: 
+    R (>= 4.0.0),
+    Cardinal (>= 3.0.0),
+    shiny (>= 1.7.0)
+Imports:
+    BiocParallel,
+    ggplot2,
+    grid,
+    gridGraphics,
+    gridExtra,
+    jsonlite
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.2.3
