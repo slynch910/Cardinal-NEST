@@ -2,7 +2,7 @@
 
 A user-friendly graphical interface for mass spectrometry imaging (MSI) data analysis using the Cardinal 3 package.
 
-> **Preview release (`v0.2.0-preview`)**: This is an early build meant to let lab members try the app. Expect rough edges, and expect behavior and interfaces to change before the stable release. Please check [Known Issues](#known-issues) and report problems through [GitHub Issues](https://github.com/slynch910/Cardinal-NEST/issues).
+> **Preview release (`v0.2.0-preview`)**: This is an early build meant for testing. Expect rough edges, and expect behavior and interfaces to change before the stable release. Please check [Known Issues](#known-issues) and report problems through [GitHub Issues](https://github.com/slynch910/Cardinal-NEST/issues).
 
 ## Overview
 
@@ -108,7 +108,7 @@ Notes:
 
 ## Known Issues
 
-These are known limitations of the preview. They are planned for upcoming releases:
+These are known limitations of the preview. There are fixes planned for upcoming releases:
 
 - **File-backed datasets become in-memory** after analysis, spatial, and export operations, so very large datasets can use a lot of RAM.
 - **Randomized analyses are not seeded yet** (PCA, NMF, spatial k-means, spatial-DGMM), so repeated runs can differ slightly.
@@ -186,33 +186,8 @@ cardinal-nest-shiny/
 │   ├── ui/                # UI components
 │   └── server/            # Server logic
 ├── docs/                   # Documentation
-├── tests/                  # Test suite
 └── inst/                   # Installed files
 ```
-
-### Running Tests
-
-The test suite is available only in the development repository. The public release does not include `tests/`. The unit-test suite lives in `tests/unit/`. Launcher scripts resolve `Rscript`
-automatically, so you do not need R on your `PATH`:
-
-```powershell
-# Windows (PowerShell) - full suite
-powershell -ExecutionPolicy Bypass -File tests\run_tests.ps1
-
-# Windows - a single file
-powershell -ExecutionPolicy Bypass -File tests\run_tests.ps1 tests\unit\test_analysis.R
-```
-
-```bash
-# Linux/macOS - full suite
-bash tests/run_tests.sh
-```
-
-Resolution order for `Rscript`: the `RSCRIPT` environment variable, then `Rscript`
-on the `PATH`, then the newest `R-*` install under `Program Files` (Windows) or the
-usual system locations (Linux/macOS). To force a specific interpreter, set
-`RSCRIPT` to its full path before running. The launcher exits `0` on success or
-with the number of failures otherwise.
 
 ## Contributing
 
@@ -221,12 +196,6 @@ Bug reports and feature requests are welcome through [GitHub Issues](https://git
 ## License
 
 Artistic-2.0
-
-## Citation
-
-If you use Cardinal NEST in your research, please cite:
-
-> Cardinal NEST: A Graphical User Interface for Cardinal 3. [Year].
 
 ## Acknowledgments
 
