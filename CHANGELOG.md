@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- README rewritten for the `v0.2.0-preview` public release: preview disclaimer, `renv::activate()` + `renv::restore()` install from `renv.lock`, local launch, remote/cluster launch via SSH tunnel (direct host and compute-node-behind-login-node), a Known Issues list, and GitHub Issues as the feedback channel; removed the non-existent Bioconductor/`runCardinalNEST()` install instructions and dead `docs/` links
+
 ## [0.2.0] - 2026-10-14
 
 ### Changed

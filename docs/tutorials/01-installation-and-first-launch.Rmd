@@ -27,26 +27,29 @@ tabbed interface.
 
 # Prerequisites
 
-- **R** 4.3 or newer (the project is developed against R 4.6).
-- A recent version of **Bioconductor** for the Cardinal stack.
+- **R** 4.6.x (the versions in `renv.lock` are pinned against R 4.6 and
+  Bioconductor 3.23).
+- **Git**, or download the repository as a ZIP.
+- **Build tools** for packages compiled from source (Rtools on Windows, Xcode
+  Command Line Tools on macOS, a C/C++/Fortran toolchain on Linux).
 - An internet connection for the initial package installation.
 
 # Install dependencies
 
-Cardinal and its imaging I/O helper come from Bioconductor; the UI stack comes
-from CRAN.
+All package versions are pinned in `renv.lock`. `renv` installs the exact
+tested environment into a project-private library.
+
+From an R session started in the `Cardinal-NEST` folder:
 
 ```{r install}
-install.packages("BiocManager")
-BiocManager::install(c("Cardinal", "CardinalIO"))
-
-install.packages(c(
-  "shiny", "bslib", "DT", "jsonlite", "here",
-  "ggplot2", "gridExtra", "gridGraphics"
-))
+install.packages("renv")
+renv::activate()
+renv::restore(prompt = FALSE)
 ```
 
-If you plan to run the automated test suite as well, also install `testthat`.
+The first restore can take a while because some packages are compiled from
+source. Any later R session started in this folder uses the project library
+automatically.
 
 # Get the application
 
@@ -54,8 +57,8 @@ Clone or download the repository, then open an R session **at the repository
 root** (the folder that contains `app.R`).
 
 ```{r clone, engine='bash'}
-git clone <your-fork-or-source-url> cardinal-nest-shiny
-cd cardinal-nest-shiny
+git clone https://github.com/slynch910/Cardinal-NEST.git
+cd Cardinal-NEST
 ```
 
 # Launch the app
@@ -69,8 +72,12 @@ shiny::runApp(".")
 Or, without opening an interactive R session:
 
 ```{r launch-cli, engine='bash'}
-Rscript -e "shiny::runApp('.')"
+Rscript -e "shiny::runApp('.', launch.browser = TRUE)"
 ```
+
+The app listens on `http://127.0.0.1:8080` by default. To run it on a remote
+server or cluster and reach it from your local browser over an SSH tunnel, see
+the **Remote server or cluster (SSH tunnel)** section of the README.
 
 The app opens in your default browser. The first launch may take a few seconds
 while Cardinal and its dependencies load.
@@ -104,11 +111,11 @@ it is the quickest way to spot warnings or errors coming from Cardinal.
 
 # Verify your installation
 
-The fastest smoke test is to import the bundled sample and confirm it loads.
+The repository ships without example data, so the fastest smoke test is to
+import any small imzML or Analyze 7.5 dataset of your own:
 
-1. Go to **Import**, set **File Format** to `imzML`.
-2. Select both files under `tests/testdata/test_sample.imzML/`
-   (`test_sample.imzML` and `test_sample.ibd`).
+1. Go to **Import** and set **File Format** to match your data.
+2. Select the dataset's files (for imzML, both the `.imzML` and `.ibd` files).
 3. Click **Import**.
 4. Open **Explore** and confirm the summary shows a non-zero pixel and feature
    count.
@@ -118,8 +125,9 @@ If that works, you are ready to move on to
 
 # Troubleshooting
 
-- **`there is no package called 'Cardinal'`** — re-run the `BiocManager::install`
-  step; Cardinal is not on CRAN.
+- **`there is no package called 'Cardinal'`** — re-run `renv::restore()` from
+  the repository folder, and make sure your R session was started there so the
+  project library is active; Cardinal is not on CRAN.
 - **App starts but tabs are blank** — make sure you launched from the repository
   root so `app.R` can source the module files.
 - **Large uploads fail** — the app raises the Shiny upload cap to 10 GB; if you
