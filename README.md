@@ -114,10 +114,10 @@ Both images use `rocker/r-ver:4.6.1` and install the exact package versions from
 
 ```bash
 docker build -t cardinal-nest .
-docker run --rm -p 8080:8080 -v /path/to/data:/data cardinal-nest
+docker run --rm -p 8080:8080 cardinal-nest
 ```
 
-Then open `http://localhost:8080`. Mounted data is available under `/data` for the server-side folder import.
+Then open `http://localhost:8080`. To give the app access to files for the server-side folder import, mount a folder at `/data` with `-v /path/to/data:/data`.
 
 Notes:
 
@@ -128,7 +128,7 @@ Notes:
 
 ```bash
 apptainer build cardinal-nest.sif apptainer/cardinal-nest.def
-apptainer run --cleanenv --bind /path/to/data:/data cardinal-nest.sif
+apptainer run --cleanenv cardinal-nest.sif
 ```
 
 The app listens on `127.0.0.1:8765` by default. On a compute node, add `--env CARDINAL_NEST_HOST=0.0.0.0` and tunnel as in Case 2 above. Set `CARDINAL_NEST_PORT` to change the port, and `CARDINAL_NEST_WORKDIR` to change where `logs/app.log` is written (default `$TMPDIR/cardinal-nest-$USER`). See `apptainer run-help cardinal-nest.sif` for details.
