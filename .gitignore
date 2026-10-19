@@ -7,7 +7,12 @@
 
 # Package build artifacts
 *.tar.gz
+*.sif
 *.rds
+
+# Container build artifacts
+*.deb
+*.log
 
 # Shiny specific
 rsconnect/

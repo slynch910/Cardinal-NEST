@@ -1,0 +1,82 @@
+# Cardinal NEST - Apptainer / Singularity definition
+#
+# Build (run from the repository root so %files paths resolve):
+#   apptainer build cardinal-nest.sif apptainer/cardinal-nest.def
+#
+# Run (defaults: host 127.0.0.1, port 8765):
+#   apptainer run --cleanenv cardinal-nest.sif
+#   apptainer run --cleanenv --env CARDINAL_NEST_HOST=0.0.0.0,CARDINAL_NEST_PORT=9000 cardinal-nest.sif
+#
+# Bind data directories with --bind, e.g. --bind /scratch/$USER/msi:/data
+
+Bootstrap: docker
+From: docker.io/rocker/r-ver:4.6.1
+
+%labels
+    Name Cardinal-NEST
+    Version 0.2.0
+    Description Shiny GUI for mass spectrometry imaging analysis with Cardinal 3
+
+%files
+    renv.lock /opt/cardinal-nest/renv.lock
+    app.R /opt/cardinal-nest/app.R
+    R /opt/cardinal-nest/R
+
+%post
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    # Harmless under rootful builds; needed if tar lacks chmod privileges.
+    export TAR_OPTIONS="--no-same-owner --no-same-permissions"
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        make g++ gfortran curl ca-certificates cmake pandoc git \
+        libuv1-dev zlib1g-dev \
+        libcurl4-openssl-dev libssl-dev libxml2-dev \
+        libfontconfig1-dev libfreetype6-dev \
+        libpng-dev libjpeg-dev libtiff-dev
+    rm -rf /var/lib/apt/lists/*
+
+    cd /opt/cardinal-nest
+    . /etc/os-release
+    export CRAN_REPO="https://packagemanager.posit.co/cran/__linux__/${VERSION_CODENAME}/latest"
+    export RENV_PATHS_CACHE=/tmp/renv-cache
+    Rscript -e "install.packages(c('renv', 'BiocManager'), repos = Sys.getenv('CRAN_REPO'))"
+    Rscript -e "options(repos = c(CRAN = Sys.getenv('CRAN_REPO'))); bioc <- renv::lockfile_read('renv.lock')\$Bioconductor\$Version; repos <- BiocManager::repositories(version = bioc); renv::restore(lockfile = 'renv.lock', library = .libPaths()[1], repos = repos, prompt = FALSE)"
+    Rscript -e "library(Cardinal); library(shiny); library(bslib); library(shinyjs); library(shinyWidgets); library(shinycssloaders)"
+    rm -rf /tmp/renv-cache /root/.cache/R
+
+    mkdir -p /data
+    chmod -R a+rX /opt/cardinal-nest
+
+%environment
+    export CARDINAL_NEST_HOME=/opt/cardinal-nest
+    # Keep host user libraries (bound via $HOME) from shadowing the pinned packages.
+    unset R_LIBS
+    export R_LIBS_USER=/opt/cardinal-nest/.no-user-library
+
+%runscript
+    set -e
+    HOST="${CARDINAL_NEST_HOST:-127.0.0.1}"
+    PORT="${CARDINAL_NEST_PORT:-8765}"
+    # The image is read-only and app.R writes logs/app.log relative to the
+    # working directory, so run from a writable per-user directory.
+    WORKDIR="${CARDINAL_NEST_WORKDIR:-${TMPDIR:-/tmp}/cardinal-nest-$(id -un)}"
+    mkdir -p "$WORKDIR/logs"
+    ln -sfn "$CARDINAL_NEST_HOME/app.R" "$WORKDIR/app.R"
+    ln -sfn "$CARDINAL_NEST_HOME/R" "$WORKDIR/R"
+    cd "$WORKDIR"
+    echo "Cardinal NEST listening on http://$HOST:$PORT (logs: $WORKDIR/logs/app.log)"
+    exec Rscript -e "shiny::runApp('.', host = '$HOST', port = as.integer('$PORT'), launch.browser = FALSE)"
+
+%help
+    Cardinal NEST (Shiny GUI for Cardinal 3).
+
+    Environment variables:
+      CARDINAL_NEST_HOST     Bind address (default 127.0.0.1; use 0.0.0.0 on a compute node)
+      CARDINAL_NEST_PORT     Port (default 8765)
+      CARDINAL_NEST_WORKDIR  Writable working/log directory (default $TMPDIR/cardinal-nest-$USER)
+
+    Example (compute node + SSH tunnel):
+      apptainer run --cleanenv --env CARDINAL_NEST_HOST=0.0.0.0 --bind /path/to/data:/data cardinal-nest.sif
+      ssh -N -L 8765:<node>:8765 user@login-node

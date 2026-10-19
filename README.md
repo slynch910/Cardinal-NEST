@@ -106,6 +106,33 @@ Notes:
 - Logs are written to `logs/app.log` in the repository folder and can be viewed in the **Help** tab.
 - On a cluster, files that are already there can be loaded with the server-side folder import on the **Import** tab. This avoids uploading them through the browser.
 
+### Containers (Docker / Apptainer)
+
+Both images use `rocker/r-ver:4.6.1` and install the exact package versions from `renv.lock`. Build from the repository root.
+
+**Docker:**
+
+```bash
+docker build -t cardinal-nest .
+docker run --rm -p 8080:8080 -v /path/to/data:/data cardinal-nest
+```
+
+Then open `http://localhost:8080`. Mounted data is available under `/data` for the server-side folder import.
+
+Notes:
+
+- Podman and rootless Buildah builds work too; the image sets `TAR_OPTIONS` so package tarballs unpack without restoring file owners/permissions.
+- The app listens on `0.0.0.0` inside the container. Change the port with `-e PORT=9000 -p 9000:9000`.
+
+**Apptainer (HPC clusters):**
+
+```bash
+apptainer build cardinal-nest.sif apptainer/cardinal-nest.def
+apptainer run --cleanenv --bind /path/to/data:/data cardinal-nest.sif
+```
+
+The app listens on `127.0.0.1:8765` by default. On a compute node, add `--env CARDINAL_NEST_HOST=0.0.0.0` and tunnel as in Case 2 above. Set `CARDINAL_NEST_PORT` to change the port, and `CARDINAL_NEST_WORKDIR` to change where `logs/app.log` is written (default `$TMPDIR/cardinal-nest-$USER`). See `apptainer run-help cardinal-nest.sif` for details.
+
 ## Known Issues
 
 These are known limitations of the preview. There are fixes planned for upcoming releases:
