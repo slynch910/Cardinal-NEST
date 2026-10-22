@@ -2,8 +2,6 @@
 # SSC/spatial-DGMM segmentation and ROI selection; results can be saved back
 # as new pixelData columns on the dataset.
 
-library(shiny)
-
 # Cardinal::spatialShrunkenCentroids wrapper. r = neighbourhood radius,
 # k = initial segment count, s = shrinkage, weights = "gaussian"|"adaptive".
 # `segment` is per-pixel; `statistic` is feature x segment t-statistics.
@@ -501,7 +499,6 @@ spatialUI <- function(id) {
 
 spatialServer <- function(id, datasets, active_id) {
   moduleServer(id, function(input, output, session) {
-    library(Cardinal)
     ns <- session$ns
 
     mse_data <- active_dataset(datasets, active_id)

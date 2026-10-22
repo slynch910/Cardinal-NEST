@@ -1,7 +1,5 @@
 # Cardinal NEST - export module: rds / imzML / Analyze 7.5 / CSV downloads
 
-library(shiny)
-
 # Format registry; bundle formats write several files zipped on download.
 export_formats <- list(
   rds   = list(label = "R data (.rds)",       ext = "rds",   bundle = FALSE),
@@ -207,7 +205,6 @@ exportUI <- function(id) {
 
 exportServer <- function(id, datasets, active_id) {
   moduleServer(id, function(input, output, session) {
-    library(Cardinal)
 
     mse_data <- active_dataset(datasets, active_id)
     active_record <- active_dataset_record(datasets, active_id)

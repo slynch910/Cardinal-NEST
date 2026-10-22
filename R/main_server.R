@@ -1,8 +1,8 @@
 # Cardinal NEST - main server
 
-library(shiny)
-
-main_server <- function(input, output, session) {
+main_server <- function(input, output, session,
+                        log_path = file.path(getwd(), "logs", "app.log"),
+                        vignette_dir = tutorials_dir()) {
 
   # Dataset store: named list of records (metadata + MSImagingExperiment).
   datasets <- reactiveVal(list())
@@ -37,7 +37,7 @@ main_server <- function(input, output, session) {
                     perf_log = perf_log, perf_state = perf_state,
                     analysis_cache = analysis_cache)
 
-  helpServer("help", log_path = app_log_path)
+  helpServer("help", log_path = log_path, vignette_dir = vignette_dir)
 
   return(list(
     mse_data = mse_data

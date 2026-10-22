@@ -1,8 +1,6 @@
 # Cardinal NEST - workflow module
 # Pipeline save/load (JSON), headless R script export, batch preprocessing.
 
-library(shiny)
-
 # Normalize a workflow spec; each step is list(type = <key>, args = <list>).
 validate_workflow_specs <- function(specs) {
   if (is.null(specs)) return(list())

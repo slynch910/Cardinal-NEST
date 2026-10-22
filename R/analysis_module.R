@@ -4,9 +4,6 @@
 # methods share a grouping mechanism (pixelData column or coord/run split);
 # results export to CSV, PNG/PDF, or back onto the dataset.
 
-library(shiny)
-library(ggplot2)
-
 # Muffle the benign matter coercion warning when file-backed spectra are
 # pulled into a local matrix; real warnings still surface.
 with_muffled_coercion_warning <- function(expr) {
@@ -1254,7 +1251,6 @@ analysisServer <- function(id, datasets, active_id,
                            perf_log = NULL, perf_state = NULL,
                            analysis_cache = NULL) {
   moduleServer(id, function(input, output, session) {
-    library(Cardinal)
     ns <- session$ns
 
     # Inputs that never affect the result (run/export/save/view pickers).

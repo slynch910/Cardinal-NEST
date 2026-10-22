@@ -29,15 +29,36 @@ tabbed interface.
 
 - **R** 4.6.x (the versions in `renv.lock` are pinned against R 4.6 and
   Bioconductor 3.23).
-- **Git**, or download the repository as a ZIP.
+- **Git** (pinned install only), or download the repository as a ZIP.
 - **Build tools** for packages compiled from source (Rtools on Windows, Xcode
   Command Line Tools on macOS, a C/C++/Fortran toolchain on Linux).
 - An internet connection for the initial package installation.
 
-# Install dependencies
+# Install Cardinal NEST
+
+Cardinal NEST is an R package, `CardinalNEST`. Choose one of the two options
+below.
+
+## Option A: quick install from GitHub
+
+```{r install-github}
+install.packages(c("remotes", "BiocManager"))
+options(repos = BiocManager::repositories())
+remotes::install_github("slynch910/Cardinal-NEST")
+```
+
+This installs whatever dependency versions are current for your R and
+Bioconductor release.
+
+## Option B: pinned environment with renv
 
 All package versions are pinned in `renv.lock`. `renv` installs the exact
 tested environment into a project-private library.
+
+```{r clone, engine='bash'}
+git clone https://github.com/slynch910/Cardinal-NEST.git
+cd Cardinal-NEST
+```
 
 From an R session started in the `Cardinal-NEST` folder:
 
@@ -50,36 +71,25 @@ Then **restart R** in the same folder and run:
 
 ```{r restore}
 renv::restore(prompt = FALSE)
+install.packages(".", repos = NULL, type = "source")
 ```
 
 The restart matters: `restore()` run in the same session as `activate()` can
 incorrectly report the library as synchronized while installing nothing.
 The first restore can take a while because some packages are compiled from
 source. Any later R session started in this folder uses the project library
-automatically.
-
-# Get the application
-
-Clone or download the repository, then open an R session **at the repository
-root** (the folder that contains `app.R`).
-
-```{r clone, engine='bash'}
-git clone https://github.com/slynch910/Cardinal-NEST.git
-cd Cardinal-NEST
-```
+automatically, so launch Cardinal NEST from this folder.
 
 # Launch the app
 
-From the repository root:
-
 ```{r launch}
-shiny::runApp(".")
+CardinalNEST::runCardinalNEST()
 ```
 
 Or, without opening an interactive R session:
 
 ```{r launch-cli, engine='bash'}
-Rscript -e "shiny::runApp('.', launch.browser = TRUE)"
+Rscript -e "CardinalNEST::runCardinalNEST(launch.browser = TRUE)"
 ```
 
 The app listens on `http://127.0.0.1:8080` by default. To run it on a remote
@@ -135,7 +145,8 @@ If that works, you are ready to move on to
 - **`there is no package called 'Cardinal'`** — re-run `renv::restore()` from
   the repository folder, and make sure your R session was started there so the
   project library is active; Cardinal is not on CRAN.
-- **App starts but tabs are blank** — make sure you launched from the repository
-  root so `app.R` can source the module files.
+- **`there is no package called 'CardinalNEST'`** — with Option B, run
+  `install.packages(".", repos = NULL, type = "source")` from the repository
+  folder and launch from that folder.
 - **Large uploads fail** — the app raises the Shiny upload cap to 10 GB; if you
   still hit a limit, check available disk space in the temp directory.

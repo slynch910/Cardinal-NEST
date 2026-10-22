@@ -2,8 +2,6 @@
 # BiocParallel backend selection, dataset memory table, result cache
 # controls, and a timing log.
 
-library(shiny)
-
 # MulticoreParam forks, unavailable on Windows.
 available_backends <- function(os = .Platform$OS.type) {
   backends <- c("Serial (single core)" = "serial",

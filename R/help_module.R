@@ -1,7 +1,5 @@
 # Cardinal NEST - help module: log viewer and vignette browser
 
-library(shiny)
-
 # Remove a leading YAML frontmatter block, if present.
 strip_yaml_frontmatter <- function(lines) {
   if (length(lines) == 0) return(lines)
@@ -88,7 +86,7 @@ helpUI <- function(id) {
 }
 
 helpServer <- function(id, log_path,
-                       vignette_dir = file.path(getwd(), "docs", "tutorials")) {
+                       vignette_dir = tutorials_dir()) {
   moduleServer(id, function(input, output, session) {
     log_lines <- reactivePoll(
       intervalMillis = 1000,

@@ -16,15 +16,28 @@ Cardinal NEST provides a visual workflow for MSI data analysis without requiring
 
 ## Installation
 
-The preview runs from a cloned copy of the repository. Package versions are pinned in `renv.lock` (R 4.6, Bioconductor 3.23, Cardinal 3.14), so `renv` gives every machine the same environment.
+Cardinal NEST is an R package (`CardinalNEST`). There are two ways to install it:
+
+- **Option A, quick install**: install the package and its dependencies straight from GitHub into your R library.
+- **Option B, pinned environment (recommended for reproducible results and clusters)**: clone the repository and use `renv` to install the exact package versions in `renv.lock` (R 4.6, Bioconductor 3.23, Cardinal 3.14), then install Cardinal NEST into that project library.
 
 ### Requirements
 
-- **R 4.6.x**. `renv` warns if your R version differs from the lockfile.
-- **Git**, or download the repository as a ZIP.
+- **R 4.6.x**.
 - **Build tools** for packages compiled from source: Rtools on Windows, Xcode Command Line Tools on macOS, or a C/C++/Fortran toolchain on Linux and clusters (for example `module load gcc`).
+- **Git** (Option B only), or download the repository as a ZIP.
 
-### Steps
+### Option A: install from GitHub
+
+```r
+install.packages(c("remotes", "BiocManager"))
+options(repos = BiocManager::repositories())
+remotes::install_github("slynch910/Cardinal-NEST")
+```
+
+Setting `repos` to the Bioconductor repositories lets `remotes` find Cardinal and the other Bioconductor dependencies. Package versions are whatever is current for your R/Bioconductor release, so they can differ from `renv.lock`.
+
+### Option B: pinned environment with renv
 
 ```bash
 git clone https://github.com/slynch910/Cardinal-NEST.git
@@ -42,23 +55,32 @@ renv::activate()  # creates a project-private library for this folder
 
 ```r
 renv::restore(prompt = FALSE)  # installs the exact versions in renv.lock
+install.packages(".", repos = NULL, type = "source")  # installs Cardinal NEST itself
 ```
 
 The restart matters: if `restore()` runs in the same session as `activate()`, the project library is not yet active and restore can incorrectly report "already synchronized" while installing nothing.
 
-The first restore compiles some packages and can take a while. Packages go into the project library, not your personal R library. Any R session started in this folder uses that library automatically.
+The first restore compiles some packages and can take a while. Packages go into the project library, not your personal R library. Any R session started in this folder uses that library automatically, so launch Cardinal NEST from this folder.
+
+After pulling a newer version with `git pull`, run `renv::restore()` and the `install.packages(".", ...)` line again.
 
 ## Launching
 
-Always launch from the repository folder (the one that contains `app.R`).
-
 ### Local machine
 
-```bash
-Rscript -e "shiny::runApp('.', launch.browser = TRUE)"
+```r
+CardinalNEST::runCardinalNEST()
 ```
 
-Or, inside R: `shiny::runApp(".")`. By default the app listens on `http://127.0.0.1:8080`.
+Or from a terminal:
+
+```bash
+Rscript -e "CardinalNEST::runCardinalNEST(launch.browser = TRUE)"
+```
+
+By default the app listens on `http://127.0.0.1:8080`. `runCardinalNEST()` accepts `host`, `port`, `launch.browser`, and `log_file` (default `logs/app.log` under the current working directory); see `?CardinalNEST::runCardinalNEST`.
+
+Running from a source checkout without installing the package still works: from the repository folder, run `shiny::runApp(".")`.
 
 ### Remote server or cluster (SSH tunnel)
 
@@ -66,11 +88,10 @@ Run the app on the remote machine and view it in your local browser through an S
 
 **Case 1: the app runs on the machine you SSH into** (a workstation, homelab, or login node where running jobs is allowed).
 
-On the remote machine:
+On the remote machine (with Option B, run this from the `Cardinal-NEST` folder):
 
 ```bash
-cd Cardinal-NEST
-Rscript -e "shiny::runApp('.', host = '127.0.0.1', port = 8765, launch.browser = FALSE)"
+Rscript -e "CardinalNEST::runCardinalNEST(host = '127.0.0.1', port = 8765, launch.browser = FALSE)"
 ```
 
 On your local machine:
@@ -87,8 +108,7 @@ On the compute node (inside your interactive job):
 
 ```bash
 hostname              # note the node name, e.g. node042
-cd Cardinal-NEST
-Rscript -e "shiny::runApp('.', host = '0.0.0.0', port = 8765, launch.browser = FALSE)"
+Rscript -e "CardinalNEST::runCardinalNEST(host = '0.0.0.0', port = 8765, launch.browser = FALSE)"
 ```
 
 On your local machine, tunnel through the login node to the compute node:
@@ -101,14 +121,15 @@ Then open `http://localhost:8765`.
 
 Notes:
 
+- With Option B, start R from the `Cardinal-NEST` folder (`cd Cardinal-NEST` first) so the pinned project library is used.
 - `host = '0.0.0.0'` makes the app reachable from other machines on the cluster network, and the app has **no authentication**. Use it only on trusted internal networks, and prefer `127.0.0.1` (Case 1) whenever possible.
 - Keep the remote session alive while you work, for example with `tmux` or `screen`, or inside the batch job.
-- Logs are written to `logs/app.log` in the repository folder and can be viewed in the **Help** tab.
+- Logs are written to `logs/app.log` in the working directory (change with `log_file`) and can be viewed in the **Help** tab.
 - On a cluster, files that are already there can be loaded with the server-side folder import on the **Import** tab. This avoids uploading them through the browser.
 
 ### Containers (Docker / Apptainer)
 
-Both images use `rocker/r-ver:4.6.1` and install the exact package versions from `renv.lock`. Build from the repository root.
+Both images use `rocker/r-ver:4.6.1`, install the exact package versions from `renv.lock`, install the `CardinalNEST` package, and start it with `runCardinalNEST()`. Build from the repository root.
 
 **Docker:**
 
@@ -133,6 +154,8 @@ apptainer run --cleanenv cardinal-nest.sif
 
 The app listens on `127.0.0.1:8765` by default. On a compute node, add `--env CARDINAL_NEST_HOST=0.0.0.0` and tunnel as in Case 2 above. Set `CARDINAL_NEST_PORT` to change the port, and `CARDINAL_NEST_WORKDIR` to change where `logs/app.log` is written (default `$TMPDIR/cardinal-nest-$USER`). See `apptainer run-help cardinal-nest.sif` for details.
 
+- On **WSL2**, rootless `apptainer build` fails with `FATAL: failed to mount binfmt_misc filesystem: invalid argument` because the fakeroot engine tries to re-mount `binfmt_misc`, which WSL already mounts. Build as root instead (`sudo apptainer build ...`, or `wsl -u root` from Windows). `apptainer run`/`exec` are unaffected.
+
 ## Known Issues
 
 These are known limitations of the preview. There are fixes planned for upcoming releases:
@@ -141,7 +164,6 @@ These are known limitations of the preview. There are fixes planned for upcoming
 - **Randomized analyses are not seeded yet** (PCA, NMF, spatial k-means, spatial-DGMM), so repeated runs can differ slightly.
 - **Batch preprocessing results are kept only for the session** and are not written to disk automatically. Use the **Export** tab to save them.
 - **The Figure Builder uses a fixed panel width**, so panels with mixed aspect ratios can look stretched.
-- **No package install yet**: `runCardinalNEST()` and `remotes::install_github()` installation are planned for the stable release. For now, launch from the cloned folder as shown above.
 - **No example data ships with the repository**. Use your own imzML, Analyze 7.5, or CSV data.
 
 ## Features
@@ -197,7 +219,7 @@ These are known limitations of the preview. There are fixes planned for upcoming
 
 ## Documentation
 
-- [Tutorials](docs/tutorials/)
+- [Tutorials](inst/tutorials/) (also available in the app's **Help** tab)
 
 ## Development
 
@@ -206,19 +228,19 @@ Cardinal NEST is developed as a Cardinal 3 GUI application. All functionality le
 ### Project Structure
 
 ```
-cardinal-nest-shiny/
-├── R/                      # R source code
-│   ├── modules/           # Shiny modules
-│   ├── utils/             # Utility functions
-│   ├── ui/                # UI components
-│   └── server/            # Server logic
-├── docs/                   # Documentation
-└── inst/                   # Installed files
+Cardinal-NEST/
+├── R/                      # Package code: Shiny modules, helpers, UI/server, runCardinalNEST()
+├── inst/tutorials/         # Tutorials shown in the Help tab
+├── man/                    # Help pages
+├── app.R                   # Launch from a source checkout (shiny::runApp("."))
+├── Dockerfile              # Docker image
+├── apptainer/              # Apptainer/Singularity definition
+└── renv.lock               # Pinned dependency versions
 ```
 
 ## Contributing
 
-Bug reports and feature requests are welcome through [GitHub Issues](https://github.com/slynch910/Cardinal-NEST/issues). Please include your operating system, R version, and the relevant part of `logs/app.log`.
+Bug reports and feature requests are welcome through [GitHub Issues](https://github.com/slynch910/Cardinal-NEST/issues). Please include your operating system, R version, `packageVersion("CardinalNEST")`, and the relevant part of `logs/app.log`.
 
 
 ## Acknowledgments

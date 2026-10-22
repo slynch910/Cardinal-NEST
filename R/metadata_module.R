@@ -1,7 +1,5 @@
 # Cardinal NEST - metadata module: pixel/feature metadata explorer
 
-library(shiny)
-
 metadataUI <- function(id) {
   ns <- NS(id)
   
@@ -84,8 +82,6 @@ metadataUI <- function(id) {
 metadataServer <- function(id, datasets, active_id) {
   moduleServer(id, function(input, output, session) {
     
-    library(Cardinal)
-    library(DT)
 
     mse_data <- active_dataset(datasets, active_id)
     output$active_dataset <- active_dataset_ui(datasets, active_id)

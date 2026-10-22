@@ -1,7 +1,5 @@
 # Cardinal NEST - main UI
 
-library(shiny)
-
 main_ui <- function() {
   navbarPage(
     title = "Cardinal NEST",

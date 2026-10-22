@@ -1,7 +1,5 @@
 # Cardinal NEST - preprocessing module: ordered pipeline builder and runner
 
-library(shiny)
-
 # Each entry maps to a Cardinal function and drives the dynamic UI; adding a
 # step only requires editing this list. Param `type` is
 # "select"|"numeric"|"text"; `show_if` shows a param conditionally.
@@ -395,7 +393,6 @@ make_preproc_record <- function(result, id, step_labels, filename = NULL, ext = 
 
 preprocessingServer <- function(id, datasets, active_id, perf_log = NULL) {
   moduleServer(id, function(input, output, session) {
-    library(Cardinal)
     ns <- session$ns
 
     mse_data <- active_dataset(datasets, active_id)

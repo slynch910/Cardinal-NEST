@@ -32,8 +32,13 @@ RUN . /etc/os-release \
  && Rscript -e "library(Cardinal); library(shiny); library(bslib); library(shinyjs); library(shinyWidgets); library(shinycssloaders)" \
  && rm -rf /tmp/renv-cache /tmp/Rtmp* /root/.cache/R
 
-COPY app.R ./
-COPY R ./R
+COPY DESCRIPTION NAMESPACE ./src/
+COPY R ./src/R
+COPY man ./src/man
+COPY inst ./src/inst
+RUN R CMD INSTALL --no-docs src \
+ && rm -rf src \
+ && Rscript -e "library(CardinalNEST)"
 
 RUN useradd --create-home --uid 1000 --shell /bin/bash nest \
  && mkdir -p /opt/cardinal-nest/logs /data \
@@ -45,4 +50,4 @@ ENV PORT=8080
 EXPOSE 8080
 VOLUME ["/data"]
 
-CMD ["Rscript", "-e", "shiny::runApp('/opt/cardinal-nest', host = '0.0.0.0', port = as.integer(Sys.getenv('PORT', '8080')), launch.browser = FALSE)"]
+CMD ["Rscript", "-e", "CardinalNEST::runCardinalNEST(host = '0.0.0.0', port = as.integer(Sys.getenv('PORT', '8080')), launch.browser = FALSE)"]

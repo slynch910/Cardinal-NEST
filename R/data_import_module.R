@@ -1,7 +1,5 @@
 # Cardinal NEST - data import module: imzML / Analyze 7.5 / CSV / rds
 
-library(shiny)
-
 summarize_msi <- function(data) {
   list(
     n_pixels = ncol(data),
@@ -507,8 +505,6 @@ dataImportUI <- function(id) {
 dataImportServer <- function(id, datasets, active_id, perf_log = NULL) {
   moduleServer(id, function(input, output, session) {
     
-    library(Cardinal)
-    library(DT)
 
     # File-backed datasets keep a live handle to their backing files; remove
     # per-import temp dirs only when the session ends.

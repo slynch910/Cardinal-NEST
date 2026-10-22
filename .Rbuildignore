@@ -2,3 +2,13 @@
 ^renv\.lock$
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^\.git$
+^app\.R$
+^Dockerfile$
+^\.dockerignore$
+^apptainer$
+^docs$
+^logs$
+^.*\.sif$
+^.*\.deb$
+^.*\.log$

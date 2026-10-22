@@ -19,8 +19,11 @@ From: docker.io/rocker/r-ver:4.6.1
 
 %files
     renv.lock /opt/cardinal-nest/renv.lock
-    app.R /opt/cardinal-nest/app.R
-    R /opt/cardinal-nest/R
+    DESCRIPTION /opt/cardinal-nest/src/DESCRIPTION
+    NAMESPACE /opt/cardinal-nest/src/NAMESPACE
+    R /opt/cardinal-nest/src/R
+    man /opt/cardinal-nest/src/man
+    inst /opt/cardinal-nest/src/inst
 
 %post
     set -e
@@ -46,6 +49,10 @@ From: docker.io/rocker/r-ver:4.6.1
     Rscript -e "library(Cardinal); library(shiny); library(bslib); library(shinyjs); library(shinyWidgets); library(shinycssloaders)"
     rm -rf /tmp/renv-cache /root/.cache/R
 
+    R CMD INSTALL --no-docs /opt/cardinal-nest/src
+    rm -rf /opt/cardinal-nest/src
+    Rscript -e "library(CardinalNEST)"
+
     mkdir -p /data
     chmod -R a+rX /opt/cardinal-nest
 
@@ -59,15 +66,13 @@ From: docker.io/rocker/r-ver:4.6.1
     set -e
     HOST="${CARDINAL_NEST_HOST:-127.0.0.1}"
     PORT="${CARDINAL_NEST_PORT:-8765}"
-    # The image is read-only and app.R writes logs/app.log relative to the
+    # The image is read-only and the app writes logs/app.log relative to the
     # working directory, so run from a writable per-user directory.
     WORKDIR="${CARDINAL_NEST_WORKDIR:-${TMPDIR:-/tmp}/cardinal-nest-$(id -un)}"
     mkdir -p "$WORKDIR/logs"
-    ln -sfn "$CARDINAL_NEST_HOME/app.R" "$WORKDIR/app.R"
-    ln -sfn "$CARDINAL_NEST_HOME/R" "$WORKDIR/R"
     cd "$WORKDIR"
     echo "Cardinal NEST listening on http://$HOST:$PORT (logs: $WORKDIR/logs/app.log)"
-    exec Rscript -e "shiny::runApp('.', host = '$HOST', port = as.integer('$PORT'), launch.browser = FALSE)"
+    exec Rscript -e "CardinalNEST::runCardinalNEST(host = '$HOST', port = as.integer('$PORT'), launch.browser = FALSE)"
 
 %help
     Cardinal NEST (Shiny GUI for Cardinal 3).

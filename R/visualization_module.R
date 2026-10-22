@@ -3,9 +3,6 @@
 # plots into a grid figure for PNG/PDF download. Metadata image mode renders
 # a categorical pixelData column as a spatial map.
 
-library(shiny)
-library(ggplot2)
-
 # Panel labels "(a)", "(b)", ..., continuing "(aa)", "(ab)", ... past 26.
 collection_panel_labels <- function(n) {
   if (n <= 0) return(character(0))
