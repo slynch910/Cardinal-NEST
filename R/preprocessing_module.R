@@ -278,7 +278,9 @@ capture_pipeline_warnings <- function(expr, label = "") {
   list(value = value, warnings = captured)
 }
 
-run_preproc_pipeline <- function(data, specs, progress = NULL) {
+# `outfile` (optional imzML path) is passed to Cardinal::process() so queued
+# steps stream their output to a file-backed dataset instead of RAM.
+run_preproc_pipeline <- function(data, specs, progress = NULL, outfile = NULL) {
   if (is.null(data)) stop("No dataset supplied to the pipeline.", call. = FALSE)
 
   warnings <- character()
@@ -337,8 +339,17 @@ run_preproc_pipeline <- function(data, specs, progress = NULL) {
 
   # Flush queued transformations (normalize/smooth/reduceBaseline/peakPick).
   report(n_steps, "Executing queued steps")
+  flush <- function(out) {
+    capture_pipeline_warnings(Cardinal::process(result, outfile = out),
+                              "Executing queued steps")
+  }
   run <- tryCatch(
-    capture_pipeline_warnings(Cardinal::process(result), "Executing queued steps"),
+    tryCatch(flush(outfile), error = function(e) {
+      # Cardinal streams to `outfile` only when the output spectra are matter
+      # arrays; otherwise process in memory and let the caller persist it.
+      if (is.null(outfile)) stop(e)
+      flush(NULL)
+    }),
     error = function(e) {
       stop(sprintf("Executing queued steps failed: %s", conditionMessage(e)),
            call. = FALSE)
@@ -363,7 +374,8 @@ next_dataset_id <- function(existing_ids) {
 
 # Dataset record for a preprocessed result, matching the Import tab's
 # structure; `ext` is appended to the display name.
-make_preproc_record <- function(result, id, step_labels, filename = NULL, ext = NULL) {
+make_preproc_record <- function(result, id, step_labels, filename = NULL,
+                                ext = NULL, provenance = NULL) {
   nm <- if (!is.null(filename)) trimws(filename) else ""
   if (!nzchar(nm)) nm <- "preprocessed"
   if (!is.null(ext) && nzchar(ext)) nm <- paste0(nm, ".", ext)
@@ -379,15 +391,21 @@ make_preproc_record <- function(result, id, step_labels, filename = NULL, ext = 
     class = class(result)[1]
   )
 
+  created <- Sys.time()
   list(
     id = id,
     name = nm,
     format = "preprocessed",
     extensions = paste(step_labels, collapse = " -> "),
     files = "",
-    imported_at = Sys.time(),
+    imported_at = created,
     summary = summary,
-    data = result
+    data = result,
+    provenance = provenance,
+    source = NULL,
+    created_at = created,
+    storage = spectra_storage(result),
+    revision = 1L
   )
 }
 
@@ -550,14 +568,19 @@ preprocessingServer <- function(id, datasets, active_id, perf_log = NULL) {
         list(type = step$type, args = build_step_args(step))
       })
 
+      # A saved result of a file-backed dataset stays file-backed.
+      keep_fb <- save && is_file_backed(data)
       pipe_t0 <- proc.time()[["elapsed"]]
       run <- tryCatch(
         withProgress(message = "Running preprocessing pipeline", value = 0, {
-          run_preproc_pipeline(
+          out <- run_preproc_pipeline(
             data, specs,
             progress = function(frac, detail) {
               setProgress(value = frac, detail = detail)
-            })
+            },
+            outfile = if (keep_fb) nest_store_file("preprocessed") else NULL)
+          if (keep_fb) out$data <- keep_file_backed(out$data, data, "preprocessed")
+          out
         }),
         error = function(e) {
           run_status(list(type = "danger", message = conditionMessage(e)))
@@ -580,8 +603,15 @@ preprocessingServer <- function(id, datasets, active_id, perf_log = NULL) {
         new_id <- next_dataset_id(names(ds))
         step_labels <- vapply(steps, function(s) preproc_step_defs[[s$type]]$label,
                               character(1))
-        record <- make_preproc_record(result, new_id, step_labels,
-                                       filename = filename, ext = ext)
+        record <- make_preproc_record(
+          result, new_id, step_labels,
+          filename = filename, ext = ext,
+          provenance = new_provenance(
+            "preprocess",
+            parent = ds[[active_id()]],
+            params = list(steps = specs)
+          )
+        )
         ds[[new_id]] <- record
         datasets(ds)
         active_id(new_id)

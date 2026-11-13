@@ -17,11 +17,6 @@ with_muffled_coercion_warning <- function(expr) {
   )
 }
 
-# Estimated in-memory spectra size: n_features * n_pixels * 8 bytes.
-estimate_spectra_bytes <- function(data) {
-  as.numeric(nrow(data)) * as.numeric(ncol(data)) * 8
-}
-
 # Materialize matter spectra to a base matrix in column chunks (a single
 # as.matrix() overflows matter's 32-bit size computation).
 ensure_in_memory <- function(data, na_action = "zero", impute_stat = "mean") {
@@ -36,6 +31,19 @@ ensure_in_memory <- function(data, na_action = "zero", impute_stat = "mean") {
   # Preserve NAs; the chosen missing-value policy applies below.
   Cardinal::spectra(data) <- materialize_matrix(s, na_action = "leave")
   apply_na_handling(data, na_action, impute_stat)
+}
+
+# Cardinal's engines read file-backed spectra in chunks; only NA handling
+# needs a temporary (memory-guarded, never stored) in-memory copy.
+prepare_analysis_data <- function(data, na_action = "zero", impute_stat = "mean",
+                                  on_warn = NULL, alternative = NULL) {
+  if (identical(na_action, "leave") || !spectra_has_na(data)) {
+    return(data)
+  }
+  memory_guard(estimate_spectra_bytes(data),
+               action = "A temporary in-memory copy for missing-value handling",
+               alternative = alternative, on_warn = on_warn)
+  ensure_in_memory(data, na_action = na_action, impute_stat = impute_stat)
 }
 
 # Column-block materialization staying under matter's ~268M-element
@@ -170,6 +178,23 @@ make_group_labels <- function(data, method = c("coord", "run"),
   factor(ifelse(vals <= threshold, lo, hi), levels = c(lo, hi))
 }
 
+# Grouping/sample inputs as JSON-safe provenance params.
+grouping_params <- function(input) {
+  if (identical(input$group_source, "existing")) {
+    class_desc <- list(source = "column", column = input$group_col)
+  } else if (identical(input$create_method, "run")) {
+    class_desc <- list(source = "run")
+  } else {
+    class_desc <- list(source = "coord",
+                       axis = input$create_axis,
+                       threshold = input$create_threshold)
+  }
+  sample_col <- input$sample_col
+  list(class = class_desc,
+       samples = if (is.null(sample_col) || !nzchar(sample_col))
+         "per_pixel" else list(column = sample_col))
+}
+
 # Cardinal::meansTest across `class_labels`; `sample_labels` aggregate
 # pixels to sample means first (avoids pseudo-replication), NULL = each
 # pixel its own sample. FDR recomputed when a non-BH method is requested.
@@ -274,8 +299,8 @@ run_contrast_test <- function(data, class_labels, sample_labels = NULL,
   res
 }
 
-# Cardinal::PCA -> list(model, scores, loadings, var_explained, coord).
-run_pca_analysis <- function(data, ncomp = 3) {
+# Cardinal::PCA; `seed` fixes irlba's random start.
+run_pca_analysis <- function(data, ncomp = 3, seed = NULL) {
   ncomp <- as.integer(ncomp)
   if (is.na(ncomp) || ncomp < 2) ncomp <- 2
   # irlba requires ncomp < min(n_features, n_pixels).
@@ -286,7 +311,7 @@ run_pca_analysis <- function(data, ncomp = 3) {
   }
   ncomp <- min(ncomp, max_comp)
 
-  pc <- Cardinal::PCA(data, ncomp = ncomp)
+  pc <- with_nest_seed(seed, Cardinal::PCA(data, ncomp = ncomp))
 
   scores <- as.data.frame(pc$x)
   loadings <- as.data.frame(pc$rotation)
@@ -300,7 +325,8 @@ run_pca_analysis <- function(data, ncomp = 3) {
     scores = scores,
     loadings = loadings,
     var_explained = ve,
-    coord = as.data.frame(Cardinal::coord(data))
+    coord = as.data.frame(Cardinal::coord(data)),
+    seed = seed
   )
 }
 
@@ -315,15 +341,22 @@ top_loadings <- function(loadings, pc = "PC1", n = 10) {
 }
 
 # Dataset record with PCA scores as pixelData columns (PCA_*).
-make_pca_record <- function(data, scores, id, filename = NULL, ext = NULL) {
+make_pca_record <- function(data, scores, id, parent = NULL,
+                            filename = NULL, ext = NULL,
+                            seed = NULL) {
   cols <- stats::setNames(as.list(scores), paste0("PCA_", colnames(scores)))
-  make_result_record(data, cols, id, paste0("PCA (", ncol(scores), " PCs)"),
-                     filename = filename, ext = ext)
+  make_result_record(data, cols, id,
+                     paste0("PCA (", ncol(scores), " PCs)", seed_label(seed)),
+                     filename = filename, ext = ext,
+                     provenance = new_provenance(
+                       "save_scores", parent = parent, method = "PCA",
+                       params = list(ncomp = ncol(scores)),
+                       seed = seed))
 }
 
 # Cardinal::NMF; per-component contribution approximated from score-column
 # sums of squares (no eigenvalue-based variance measure).
-run_nmf_analysis <- function(data, ncomp = 3) {
+run_nmf_analysis <- function(data, ncomp = 3, seed = NULL) {
   ncomp <- as.integer(ncomp)
   if (is.na(ncomp) || ncomp < 2) ncomp <- 2
   # Rank must be < min(features, pixels), as with PCA.
@@ -334,7 +367,7 @@ run_nmf_analysis <- function(data, ncomp = 3) {
   }
   ncomp <- min(ncomp, max_comp)
 
-  nmf <- Cardinal::NMF(data, ncomp = ncomp)
+  nmf <- with_nest_seed(seed, Cardinal::NMF(data, ncomp = ncomp))
 
   scores <- as.data.frame(nmf$x)
   loadings <- as.data.frame(nmf$activation)
@@ -349,15 +382,23 @@ run_nmf_analysis <- function(data, ncomp = 3) {
     scores = scores,
     loadings = loadings,
     var_explained = ve,
-    coord = as.data.frame(Cardinal::coord(data))
+    coord = as.data.frame(Cardinal::coord(data)),
+    seed = seed
   )
 }
 
 # Dataset record with NMF scores as pixelData columns (NMF_*).
-make_nmf_record <- function(data, scores, id, filename = NULL, ext = NULL) {
+make_nmf_record <- function(data, scores, id, parent = NULL,
+                            filename = NULL, ext = NULL,
+                            seed = NULL) {
   cols <- stats::setNames(as.list(scores), paste0("NMF_", colnames(scores)))
-  make_result_record(data, cols, id, paste0("NMF (", ncol(scores), " comps)"),
-                     filename = filename, ext = ext)
+  make_result_record(data, cols, id,
+                     paste0("NMF (", ncol(scores), " comps)", seed_label(seed)),
+                     filename = filename, ext = ext,
+                     provenance = new_provenance(
+                       "save_scores", parent = parent, method = "NMF",
+                       params = list(ncomp = ncol(scores)),
+                       seed = seed))
 }
 
 # PLS-DA or OPLS-DA via Cardinal::PLS/OPLS; class factor as response,
@@ -429,13 +470,18 @@ run_discriminant_analysis <- function(data, class_labels, ncomp = 3,
 }
 
 # Dataset record with DA scores + predicted class (PLS_/OPLS_*).
-make_da_record <- function(data, da, id, filename = NULL, ext = NULL) {
+make_da_record <- function(data, da, id, parent = NULL,
+                           filename = NULL, ext = NULL) {
   prefix <- toupper(da$method)
   cols <- stats::setNames(as.list(da$scores), paste0(prefix, "_", names(da$scores)))
   cols[[paste0(prefix, "_predicted")]] <- da$predicted
   make_result_record(data, cols, id,
                      paste0(prefix, "-DA (", ncol(da$scores), " comps)"),
-                     filename = filename, ext = ext)
+                     filename = filename, ext = ext,
+                     provenance = new_provenance(
+                       "save_scores", parent = parent, method = paste0(prefix, "-DA"),
+                       params = list(ncomp = ncol(da$scores)),
+                       seed = NULL))
 }
 
 # Supervised spatialShrunkenCentroids; class factor as `y`.
@@ -527,16 +573,18 @@ run_cross_validation <- function(data, class_labels, model_type = c("pls", "ssc"
   if (is.na(nfolds) || nfolds < 2) nfolds <- 5L
   nfolds <- min(nfolds, ncol(data))
 
-  if (!is.null(seed) && !is.na(seed)) set.seed(as.integer(seed))
+  if (!is.null(seed) && is.na(seed)) seed <- NULL
 
   # Stratified folds: shuffle within class, deal round-robin so every fold
   # contains members of every class.
   folds <- integer(ncol(data))
-  for (cl in levels(class_labels)) {
-    idx <- which(class_labels == cl)
-    idx <- sample(idx)
-    folds[idx] <- rep(seq_len(nfolds), length.out = length(idx))
-  }
+  with_nest_seed(seed, {
+    for (cl in levels(class_labels)) {
+      idx <- which(class_labels == cl)
+      idx <- idx[sample.int(length(idx))]
+      folds[idx] <- rep(seq_len(nfolds), length.out = length(idx))
+    }
+  })
 
   fit_fn <- if (model_type == "pls") Cardinal::PLS else Cardinal::spatialShrunkenCentroids
 
@@ -547,12 +595,12 @@ run_cross_validation <- function(data, class_labels, model_type = c("pls", "ssc"
     list(r = r, s = s, weights = weights, k = nlevels(class_labels))
   }
 
-  cv <- with_muffled_coercion_warning(
+  cv <- with_nest_seed(seed, with_muffled_coercion_warning(
     do.call(Cardinal::crossValidate,
             c(list(fit_fn, data, y = class_labels, folds = folds,
                    trainProcess = NULL, testProcess = NULL),
               extra_args))
-  )
+  ))
 
   # cv's `$`/`[[` are overridden; unclass() for plain list access.
   m <- unclass(cv@model)
@@ -594,7 +642,8 @@ run_cross_validation <- function(data, class_labels, model_type = c("pls", "ssc"
     fold_scores = fold_scores,
     folds = folds,
     mean_recall = mean_recall,
-    class_levels = cls_levels
+    class_levels = cls_levels,
+    seed = seed
   )
 }
 
@@ -619,15 +668,21 @@ plot_cross_validation <- function(cv_result) {
 }
 
 # Dataset record with SSC predictions as pixelData column ssc_class.
-make_ssc_record <- function(data, ssc, id, filename = NULL, ext = NULL) {
+make_ssc_record <- function(data, ssc, id, parent = NULL,
+                            filename = NULL, ext = NULL) {
   make_result_record(data, list(ssc_class = ssc$predicted), id,
                      sprintf("SSC classification (r = %g, s = %g)",
                              ssc$r, ssc$s),
-                     filename = filename, ext = ext)
+                     filename = filename, ext = ext,
+                     provenance = new_provenance(
+                       "save_scores", parent = parent, method = "SSC",
+                       params = list(r = ssc$r, s = ssc$s,
+                                     weights = ssc$weights),
+                       seed = NULL))
 }
 
 # Cardinal::spatialKMeans clustering into k groups (radius r).
-run_clustering <- function(data, k = 3, r = 1) {
+run_clustering <- function(data, k = 3, r = 1, seed = NULL) {
   k <- as.numeric(k)
   r <- as.numeric(r)
   if (is.na(k) || k < 2) k <- 2
@@ -639,7 +694,7 @@ run_clustering <- function(data, k = 3, r = 1) {
 
   coord <- as.data.frame(Cardinal::coord(data))
 
-  model <- Cardinal::spatialKMeans(data, r = r, k = k)
+  model <- with_nest_seed(seed, Cardinal::spatialKMeans(data, r = r, k = k))
   cluster <- as.integer(model[["cluster"]])
   extra <- list(r = r,
                 tot_withinss = model[["tot.withinss"]],
@@ -654,16 +709,22 @@ run_clustering <- function(data, k = 3, r = 1) {
     cluster = cluster,
     sizes = table(cluster),
     coord = coord,
-    extra = extra
+    extra = extra,
+    seed = seed
   )
 }
 
 # Dataset record with clusters as pixelData column kmeans_cluster.
-make_clustering_record <- function(data, cl, id, filename = NULL, ext = NULL) {
+make_clustering_record <- function(data, cl, id, parent = NULL,
+                                   filename = NULL, ext = NULL) {
   cols <- stats::setNames(list(cl$cluster), paste0(cl$method, "_cluster"))
   make_result_record(data, cols, id,
-                     sprintf("k-means clustering (k = %d)", cl$k),
-                     filename = filename, ext = ext)
+                     sprintf("k-means clustering (k = %d)%s", cl$k, seed_label(cl$seed)),
+                     filename = filename, ext = ext,
+                     provenance = new_provenance(
+                       "save_scores", parent = parent, method = "spatialKMeans",
+                       params = list(k = cl$k, r = cl$extra$r),
+                       seed = cl$seed))
 }
 
 # Rank features by colocalization with a reference m/z
@@ -694,12 +755,12 @@ run_colocalization <- function(data, mz = NULL, mask = NULL, n = 20) {
     if (!any(mask, na.rm = TRUE)) {
       stop("The selected region contains no pixels.", call. = FALSE)
     }
-    # Column-block materialization; direct as.matrix() overflows on big data.
-    intensities <- materialize_matrix(Cardinal::spectra(data))  # features x pixels
-    refv <- as.numeric(mask)
-    cor_vals <- suppressWarnings(
-      apply(intensities, 1, function(x) stats::cor(x, refv))
+    # Chunked, so file-backed spectra are never loaded whole.
+    coloc <- suppressWarnings(
+      Cardinal::colocalized(data, ref = as.numeric(mask), n = n_feat,
+                            sort.by = "none")
     )
+    cor_vals <- as.numeric(as.data.frame(coloc)$cor)
     cor_vals[!is.finite(cor_vals)] <- 0
     df <- data.frame(mz = Cardinal::mz(data), correlation = cor_vals)
     df <- df[order(-df$correlation), , drop = FALSE]
@@ -1120,13 +1181,15 @@ analysisUI <- function(id) {
             conditionalPanel(
               condition = sprintf("input['%s'] == 'pca'", ns("analysis_type")),
               numericInput(ns("ncomp"), "Number of components",
-                           value = 3, min = 2, step = 1)
+                           value = 3, min = 2, step = 1),
+              seed_input(ns, "pca_seed")
             ),
 
             conditionalPanel(
               condition = sprintf("input['%s'] == 'nmf'", ns("analysis_type")),
               numericInput(ns("nmf_ncomp"), "Number of components",
                            value = 3, min = 2, step = 1),
+              seed_input(ns, "nmf_seed"),
               div(class = "text-muted small",
                   "Non-negative matrix factorization (Cardinal::NMF).")
             ),
@@ -1140,7 +1203,8 @@ analysisUI <- function(id) {
               conditionalPanel(
                 condition = sprintf("input['%s']", ns("da_cv")),
                 numericInput(ns("da_nfolds"), "Number of folds",
-                             value = 5, min = 2, step = 1)
+                             value = 5, min = 2, step = 1),
+                seed_input(ns, "da_cv_seed")
               ),
               div(class = "text-muted small",
                   "Supervised: requires the class variable defined above.")
@@ -1159,7 +1223,8 @@ analysisUI <- function(id) {
               conditionalPanel(
                 condition = sprintf("input['%s']", ns("ssc_cv")),
                 numericInput(ns("ssc_nfolds"), "Number of folds",
-                             value = 5, min = 2, step = 1)
+                             value = 5, min = 2, step = 1),
+                seed_input(ns, "ssc_cv_seed")
               ),
               div(class = "text-muted small",
                   "Supervised spatial shrunken centroids (Cardinal::spatialShrunkenCentroids with y = class); requires the class variable defined above.")
@@ -1171,6 +1236,7 @@ analysisUI <- function(id) {
                            value = 3, min = 2, step = 1),
               numericInput(ns("clust_r"), "Spatial neighborhood radius (r)",
                            value = 1, min = 0, step = 1),
+              seed_input(ns, "clust_seed"),
               div(class = "text-muted small",
                   "Spatially-aware k-means (Cardinal::spatialKMeans).")
             ),
@@ -1257,7 +1323,13 @@ analysisServer <- function(id, datasets, active_id,
     volatile_inputs <- c("run_analysis", "plot_format", "export_csv",
                          "export_plot", "save_scores", "save_scores_confirm",
                          "save_filename", "save_ext")
-    volatile_suffix <- "(_view|_x|_y)$"
+    volatile_suffix <- "(_view|_x|_y|_generate)$"
+
+    # Seed used when an operation's own seed input is blank.
+    global_seed <- function() session_global_seed(perf_state)
+    observe_seed_generators(input, session,
+                            c("pca_seed", "nmf_seed", "clust_seed",
+                              "da_cv_seed", "ssc_cv_seed"))
 
     # Cache key: dataset fingerprint + every non-volatile input.
     analysis_signature <- function(data) {
@@ -1267,7 +1339,7 @@ analysisServer <- function(id, datasets, active_id,
         v <- input[[k]]
         if (is.null(v)) "" else paste(as.character(v), collapse = ",")
       }, character(1))
-      paste(dataset_fingerprint(data), active_id(),
+      paste(dataset_fingerprint(data), active_id(), global_seed(),
             paste(keys, vals, sep = "=", collapse = "|"), sep = "||")
     }
 
@@ -1294,6 +1366,7 @@ analysisServer <- function(id, datasets, active_id,
 
     status <- reactiveVal(list(type = "info", message = "No analysis run yet."))
     result <- reactiveVal(NULL)  # list(kind, table, plot_fn, ...)
+    observe_result_log(result, datasets, "analysis")
     # Persisted meansTest fit + signature for contrast-test reuse.
     means_model <- reactiveVal(NULL)
 
@@ -1370,18 +1443,25 @@ analysisServer <- function(id, datasets, active_id,
         return()
       }
 
-      # Engines fail on file-backed matter storage; materialize once here.
+      # Runs on stored spectra; an in-memory copy is made only to handle NAs.
       na_action <- if (is.null(input$handle_na)) "zero" else input$handle_na
       impute_stat <- if (is.null(input$impute_stat)) "mean" else input$impute_stat
       data <- tryCatch(
-        with_progress_stages("Loading spectra into memory for analysis",
-                     ensure_in_memory(data, na_action = na_action,
-                                      impute_stat = impute_stat)),
+        with_progress_stages("Checking spectra for missing values",
+                     prepare_analysis_data(data, na_action = na_action,
+                                           impute_stat = impute_stat,
+                                           on_warn = notify_memory_warning,
+                                           alternative = paste(
+                                             "Set 'Handle NAs' to 'Leave as missing'",
+                                             "to run on the stored spectra without a copy."))),
         error = function(e) {
-          status(list(type = "danger",
-                      message = sprintf("Could not load spectra into memory (%.1f GB estimated): %s",
-                                        estimate_spectra_bytes(data) / 1024^3,
-                                        conditionMessage(e))))
+          msg <- if (inherits(e, "cardinalnest_memory_blocked")) {
+            conditionMessage(e)
+          } else {
+            sprintf("Could not load spectra into memory (%.1f GB estimated): %s",
+                    estimate_spectra_bytes(data) / 1024^3, conditionMessage(e))
+          }
+          status(list(type = "danger", message = msg))
           NULL
         }
       )
@@ -1401,6 +1481,9 @@ analysisServer <- function(id, datasets, active_id,
         }
       }
       run_t0 <- proc.time()[["elapsed"]]
+
+      # Parent record for the provenance attached to every result below.
+      parent_rec <- datasets()[[active_id()]]
 
       if (identical(input$analysis_type, "univariate")) {
         labs <- tryCatch(current_group_labels(), error = function(e) NULL)
@@ -1431,7 +1514,11 @@ analysisServer <- function(id, datasets, active_id,
         result(list(
           kind = "univariate",
           table = res,
-          plot_fn = function() plot_univariate(res, alpha = alpha)
+          plot_fn = function() plot_univariate(res, alpha = alpha),
+          provenance = new_provenance(
+            "means_test", parent = parent_rec, method = "meansTest",
+            params = c(grouping_params(input),
+                       list(fdr_method = input$fdr_method, alpha = alpha)))
         ))
         status(list(type = "success",
                     message = sprintf("Mean test complete: %d of %d features significant (FDR <= %.3g).",
@@ -1475,7 +1562,14 @@ analysisServer <- function(id, datasets, active_id,
         result(list(
           kind = "contrast",
           table = res,
-          plot_fn = function() plot_contrast(res, alpha = alpha)
+          plot_fn = function() plot_contrast(res, alpha = alpha),
+          provenance = new_provenance(
+            "contrast_test", parent = parent_rec, method = "contrastTest",
+            params = c(grouping_params(input),
+                       list(method = input$contrast_method,
+                            emm_adjust = input$contrast_emm_adjust,
+                            fdr_method = input$contrast_fdr_method,
+                            alpha = alpha)))
         ))
         status(list(type = "success",
                     message = sprintf("Contrast test complete: %d of %d features significant (FDR <= %.3g).",
@@ -1484,7 +1578,8 @@ analysisServer <- function(id, datasets, active_id,
       } else if (identical(input$analysis_type, "pca")) {
         pca <- with_progress_stages("Running PCA", {
           tryCatch(
-            run_pca_analysis(data, ncomp = input$ncomp),
+            run_pca_analysis(data, ncomp = input$ncomp,
+                             seed = resolve_seed(input$pca_seed, global_seed())),
             error = function(e) {
               status(list(type = "danger", message = conditionMessage(e)))
               NULL
@@ -1501,6 +1596,11 @@ analysisServer <- function(id, datasets, active_id,
           table = tbl,
           pca = pca,
           groups = labs,
+          seed = pca$seed,
+          provenance = new_provenance(
+            "pca", parent = parent_rec, method = "PCA",
+            params = list(ncomp = ncol(pca$scores)),
+            seed = pca$seed),
           plot_fn = function() {
             plot_pca_scores(pca, pc_x = comps[1], pc_y = comps[min(2, length(comps))],
                             groups = labs)
@@ -1508,13 +1608,14 @@ analysisServer <- function(id, datasets, active_id,
         ))
         ve <- pca$var_explained
         status(list(type = "success",
-                    message = sprintf("PCA complete: %d components, %.1f%% variance explained.",
-                                      length(ve), 100 * sum(ve))))
+                    message = sprintf("PCA complete: %d components, %.1f%% variance explained%s.",
+                                      length(ve), 100 * sum(ve), seed_label(pca$seed))))
 
       } else if (identical(input$analysis_type, "nmf")) {
         nmf <- with_progress_stages("Running NMF", {
           tryCatch(
-            run_nmf_analysis(data, ncomp = input$nmf_ncomp),
+            run_nmf_analysis(data, ncomp = input$nmf_ncomp,
+                             seed = resolve_seed(input$nmf_seed, global_seed())),
             error = function(e) {
               status(list(type = "danger", message = conditionMessage(e)))
               NULL
@@ -1531,14 +1632,19 @@ analysisServer <- function(id, datasets, active_id,
           table = tbl,
           nmf = nmf,
           groups = labs,
+          seed = nmf$seed,
+          provenance = new_provenance(
+            "nmf", parent = parent_rec, method = "NMF",
+            params = list(ncomp = ncol(nmf$scores)),
+            seed = nmf$seed),
           plot_fn = function() {
             plot_nmf_scores(nmf, comp_x = comps[1], comp_y = comps[min(2, length(comps))],
                             groups = labs)
           }
         ))
         status(list(type = "success",
-                    message = sprintf("NMF complete: %d components extracted over %d features.",
-                                      length(comps), nrow(nmf$loadings))))
+                    message = sprintf("NMF complete: %d components extracted over %d features%s.",
+                                      length(comps), nrow(nmf$loadings), seed_label(nmf$seed))))
 
       } else if (input$analysis_type %in% c("plsda", "oplsda")) {
         method <- if (identical(input$analysis_type, "oplsda")) "opls" else "pls"
@@ -1571,6 +1677,11 @@ analysisServer <- function(id, datasets, active_id,
           table = tbl,
           da = da,
           groups = da$actual,
+          provenance = new_provenance(
+            "discriminant_analysis", parent = parent_rec,
+            method = toupper(method),
+            params = c(grouping_params(input),
+                       list(ncomp = ncol(da$scores)))),
           plot_fn = function() {
             plot_da_scores(da, comp_x = comps[1],
                            comp_y = comps[min(2, length(comps))],
@@ -1593,7 +1704,8 @@ analysisServer <- function(id, datasets, active_id,
             tryCatch(
               run_cross_validation(data, labs, model_type = "pls",
                                    ncomp = input$da_ncomp,
-                                   nfolds = input$da_nfolds),
+                                   nfolds = input$da_nfolds,
+                                   seed = resolve_seed(input$da_cv_seed, global_seed())),
               error = function(e) {
                 status(list(type = "danger", message = conditionMessage(e)))
                 NULL
@@ -1601,10 +1713,14 @@ analysisServer <- function(id, datasets, active_id,
             )
           })
           if (!is.null(cv)) {
-            cv_msg <- sprintf(" Cross-validation: %.1f%% mean recall (%d folds).",
-                              100 * cv[["mean_recall"]], cv[["nfolds"]])
+            cv_msg <- sprintf(" Cross-validation: %.1f%% mean recall (%d folds)%s.",
+                              100 * cv[["mean_recall"]], cv[["nfolds"]],
+                              seed_label(cv[["seed"]]))
             res <- result()
             res[["cv"]] <- cv
+            res[["seed"]] <- cv[["seed"]]
+            res$provenance$params$cv <- list(nfolds = cv[["nfolds"]],
+                                             seed = cv[["seed"]])
             res$plot_fn <- function() {
               p1 <- plot_da_scores(da, comp_x = comps[1],
                                    comp_y = comps[min(2, length(comps))],
@@ -1655,7 +1771,11 @@ analysisServer <- function(id, datasets, active_id,
           table = tbl,
           ssc = ssc,
           groups = ssc$actual,
-          plot_fn = function() plot_ssc_class(ssc)
+          plot_fn = function() plot_ssc_class(ssc),
+          provenance = new_provenance(
+            "ssc_classification", parent = parent_rec, method = "SSC",
+            params = c(grouping_params(input),
+                       list(r = ssc$r, s = ssc$s, weights = ssc$weights)))
         ))
         status(list(type = "success",
                     message = sprintf("SSC classification complete: r = %g, s = %g, %.1f%% training accuracy.",
@@ -1668,7 +1788,8 @@ analysisServer <- function(id, datasets, active_id,
               run_cross_validation(data, labs, model_type = "ssc",
                                    r = ssc$r, s = ssc$s,
                                    weights = ssc$weights,
-                                   nfolds = input$ssc_nfolds),
+                                   nfolds = input$ssc_nfolds,
+                                   seed = resolve_seed(input$ssc_cv_seed, global_seed())),
               error = function(e) {
                 status(list(type = "danger", message = conditionMessage(e)))
                 NULL
@@ -1676,10 +1797,14 @@ analysisServer <- function(id, datasets, active_id,
             )
           })
           if (!is.null(cv)) {
-            cv_msg <- sprintf(" Cross-validation: %.1f%% mean recall (%d folds).",
-                              100 * cv[["mean_recall"]], cv[["nfolds"]])
+            cv_msg <- sprintf(" Cross-validation: %.1f%% mean recall (%d folds)%s.",
+                              100 * cv[["mean_recall"]], cv[["nfolds"]],
+                              seed_label(cv[["seed"]]))
             res <- result()
             res[["cv"]] <- cv
+            res[["seed"]] <- cv[["seed"]]
+            res$provenance$params$cv <- list(nfolds = cv[["nfolds"]],
+                                             seed = cv[["seed"]])
             res$plot_fn <- function() {
               print(plot_ssc_class(ssc))
               grid::grid.newpage()
@@ -1734,7 +1859,11 @@ analysisServer <- function(id, datasets, active_id,
           kind = "coloc",
           table = coloc$table,
           coloc = coloc,
-          plot_fn = function() plot_colocalization(coloc, data, top = top)
+          plot_fn = function() plot_colocalization(coloc, data, top = top),
+          provenance = new_provenance(
+            "colocalization", parent = parent_rec, method = "colocalized",
+            params = c(grouping_params(input),
+                       list(reference = ref_desc, top = top)))
         ))
         status(list(type = "success",
                     message = sprintf("Colocalization complete: %d features ranked against %s.",
@@ -1744,7 +1873,8 @@ analysisServer <- function(id, datasets, active_id,
         cl <- with_progress_stages("Running k-means clustering", {
           tryCatch(
             run_clustering(data, k = input$clust_k,
-                           r = if (is.null(input$clust_r)) 1 else input$clust_r),
+                           r = if (is.null(input$clust_r)) 1 else input$clust_r,
+                           seed = resolve_seed(input$clust_seed, global_seed())),
             error = function(e) {
               status(list(type = "danger", message = conditionMessage(e)))
               NULL
@@ -1760,12 +1890,18 @@ analysisServer <- function(id, datasets, active_id,
           method = "kmeans",
           table = tbl,
           clustering = cl,
-          plot_fn = function() plot_clustering(cl)
+          seed = cl$seed,
+          plot_fn = function() plot_clustering(cl),
+          provenance = new_provenance(
+            "clustering", parent = parent_rec, method = "spatialKMeans",
+            params = list(k = cl$k, r = cl$extra$r),
+            seed = cl$seed)
         ))
         status(list(type = "success",
-                    message = sprintf("k-means clustering complete: %d clusters over %d pixels (sizes: %s).",
+                    message = sprintf("k-means clustering complete: %d clusters over %d pixels (sizes: %s)%s.",
                                       cl$k, length(cl$cluster),
-                                      paste(as.integer(cl$sizes), collapse = ", "))))
+                                      paste(as.integer(cl$sizes), collapse = ", "),
+                                      seed_label(cl$seed))))
       }
 
       # On success, record timing and memoize the result.
@@ -1985,18 +2121,24 @@ analysisServer <- function(id, datasets, active_id,
       req(!is.null(res), res$kind %in% c("pca", "nmf", "da", "sscda", "clustering"), !is.null(data))
       ds <- datasets()
       new_id <- next_dataset_id(names(ds))
+      parent_rec <- ds[[active_id()]]
       record <- tryCatch(
         switch(res$kind,
-          da = make_da_record(data, res$da, new_id,
+          da = make_da_record(data, res$da, new_id, parent = parent_rec,
                               filename = input$save_filename, ext = input$save_ext),
-          sscda = make_ssc_record(data, res$ssc, new_id,
+          sscda = make_ssc_record(data, res$ssc, new_id, parent = parent_rec,
                               filename = input$save_filename, ext = input$save_ext),
           clustering = make_clustering_record(data, res$clustering, new_id,
+                              parent = parent_rec,
                               filename = input$save_filename, ext = input$save_ext),
           nmf = make_nmf_record(data, res$nmf$scores, new_id,
-                              filename = input$save_filename, ext = input$save_ext),
+                              parent = parent_rec,
+                              filename = input$save_filename, ext = input$save_ext,
+                              seed = res$nmf$seed),
           make_pca_record(data, res$pca$scores, new_id,
-                          filename = input$save_filename, ext = input$save_ext)
+                          parent = parent_rec,
+                          filename = input$save_filename, ext = input$save_ext,
+                          seed = res$pca$seed)
         ),
         error = function(e) {
           status(list(type = "danger", message = conditionMessage(e)))
@@ -2011,18 +2153,22 @@ analysisServer <- function(id, datasets, active_id,
                   message = sprintf("Scores saved as '%s'.", record$name)))
     })
 
+    csv_filename <- function() {
+      res <- result()
+      kind <- if (is.null(res)) "results" else res$kind
+      paste0("analysis_", kind, seed_tag(res$seed), "_",
+             format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    }
     output$export_csv <- downloadHandler(
-      filename = function() {
-        res <- result()
-        kind <- if (is.null(res)) "results" else res$kind
-        paste0("analysis_", kind, "_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
-      },
+      filename = csv_filename,
       content = function(file) {
         res <- result()
         if (is.null(res)) {
           utils::write.csv(data.frame(), file, row.names = FALSE)
         } else {
           utils::write.csv(res$table, file, row.names = FALSE)
+          log_export_event("export_table", csv_filename(), "csv",
+                           provenance = res$provenance, session = session)
         }
       }
     )
@@ -2031,7 +2177,7 @@ analysisServer <- function(id, datasets, active_id,
       result, function() input$plot_format,
       basename = function() {
         res <- result()
-        paste0("analysis_", if (is.null(res)) "plot" else res$kind)
+        paste0("analysis_", if (is.null(res)) "plot" else res$kind, seed_tag(res$seed))
       },
       empty_msg = "No analysis result to export.")
 

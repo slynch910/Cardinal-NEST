@@ -9,8 +9,24 @@ main_server <- function(input, output, session,
   active_id <- reactiveVal(NULL)
 
   perf_log <- reactiveVal(NULL)
-  perf_state <- reactiveValues(cache_enabled = TRUE)
+  perf_state <- reactiveValues(cache_enabled = TRUE, global_seed = default_seed())
+  # Reaches modules with a fixed signature (spatialServer) via userData.
+  session$userData$perf_state <- perf_state
   analysis_cache <- new_result_cache()
+
+  # Session operation log (Help tab); published for module logging helpers.
+  op_log <- reactiveVal(list())
+  session$userData$op_log <- op_log
+
+  # Log create/remove/rename diffs of the dataset store.
+  store_snapshot_rv <- reactiveVal(list())
+  observe({
+    ds <- datasets()
+    for (ev in dataset_store_events(store_snapshot_rv(), ds)) {
+      log_session_event(ev)
+    }
+    store_snapshot_rv(store_snapshot(ds))
+  })
 
   mse_data <- active_dataset(datasets, active_id)
 
@@ -37,7 +53,8 @@ main_server <- function(input, output, session,
                     perf_log = perf_log, perf_state = perf_state,
                     analysis_cache = analysis_cache)
 
-  helpServer("help", log_path = log_path, vignette_dir = vignette_dir)
+  helpServer("help", log_path = log_path, vignette_dir = vignette_dir,
+             op_log = op_log)
 
   return(list(
     mse_data = mse_data

@@ -2,7 +2,7 @@
 
 A user-friendly graphical interface for mass spectrometry imaging (MSI) data analysis using the Cardinal 3 package.
 
-> **Preview release (`v0.2.0-preview`)**: This is an early build meant for testing. Expect rough edges, and expect behavior and interfaces to change before the stable release. Please check [Known Issues](#known-issues) and report problems through [GitHub Issues](https://github.com/slynch910/Cardinal-NEST/issues).
+> **Preview release (`v0.2.1-preview`)**: This is an early build meant for testing. Expect rough edges, and expect behavior and interfaces to change before the stable release. Please check [Known Issues](#known-issues) and report problems through [GitHub Issues](https://github.com/slynch910/Cardinal-NEST/issues).
 
 ## Overview
 
@@ -154,14 +154,13 @@ apptainer run --cleanenv cardinal-nest.sif
 
 The app listens on `127.0.0.1:8765` by default. On a compute node, add `--env CARDINAL_NEST_HOST=0.0.0.0` and tunnel as in Case 2 above. Set `CARDINAL_NEST_PORT` to change the port, and `CARDINAL_NEST_WORKDIR` to change where `logs/app.log` is written (default `$TMPDIR/cardinal-nest-$USER`). See `apptainer run-help cardinal-nest.sif` for details.
 
-- On **WSL2**, rootless `apptainer build` fails with `FATAL: failed to mount binfmt_misc filesystem: invalid argument` because the fakeroot engine tries to re-mount `binfmt_misc`, which WSL already mounts. Build as root instead (`sudo apptainer build ...`, or `wsl -u root` from Windows). `apptainer run`/`exec` are unaffected.
+- On **WSL2**, rootless `apptainer build` fails with `FATAL: failed to mount binfmt_misc filesystem: invalid argument` because the fakeroot engine tries to re-mount `binfmt_misc`, which WSL already mounts. Build as root instead (`sudo apptainer build ...`, or `wsl -u root` from Windows). `apptainer run`/`exec` work; `instance start` fails on WSL's cgroup setup.
 
 ## Known Issues
 
 These are known limitations of the preview. There are fixes planned for upcoming releases:
 
-- **File-backed datasets become in-memory** after analysis, spatial, and export operations, so very large datasets can use a lot of RAM.
-- **Randomized analyses are not seeded yet** (PCA, NMF, spatial k-means, spatial-DGMM), so repeated runs can differ slightly.
+- **In-memory copies are still made when needed** — missing-value handling and the "Convert to in-memory" button materialize spectra, but memory guardrails check the estimated size against available RAM (system, cgroup, or Slurm limit) first and warn or block large conversions.
 - **Batch preprocessing results are kept only for the session** and are not written to disk automatically. Use the **Export** tab to save them.
 - **The Figure Builder uses a fixed panel width**, so panels with mixed aspect ratios can look stretched.
 - **No example data ships with the repository**. Use your own imzML, Analyze 7.5, or CSV data.
@@ -173,6 +172,8 @@ These are known limitations of the preview. There are fixes planned for upcoming
 - Interactive metadata explorer
 - Dataset library with search and tagging
 - Memory management for large datasets
+- Provenance records on every dataset and export (parent record, operation, parameters, seed, package versions), shipped as `.provenance.json` sidecars with exports
+- Session operation record on the Help tab: chronological log of imports, analyses, and downloads, exportable as JSON or text
 
 ### Visualization
 - Interactive spectrum viewer
@@ -204,6 +205,9 @@ These are known limitations of the preview. There are fixes planned for upcoming
 
 ### Performance & Parallel Computing
 - Choose a BiocParallel backend (Serial, Snow, or Multicore where supported) and worker count, applied via `Cardinal::setCardinalBPPARAM()`
+- Reproducible randomized analyses: a global RNG seed plus per-run seed overrides for PCA, NMF, cross-validation, k-means, spatial segmentation, and spatial-DGMM, restoring the caller's RNG state afterwards
+- Memory guardrails: before any in-memory conversion the estimated spectra size is checked against available memory (system RAM, cgroup limit, or Slurm allocation); warns above 50%, blocks above 80% — thresholds and an optional cap via `options(cardinalnest.memory_limit)` / `CARDINALNEST_MEMORY_LIMIT`
+- "Test backend" check: verifies parallel workers are separate processes and benchmarks the backend against serial execution
 - Per-dataset memory panel showing pixel/feature counts, estimated in-memory size, and storage mode
 - One-click "Convert to in-memory" for the active dataset to speed up repeated analysis
 - Result cache for the Analyze tab: re-run identical inputs instantly
@@ -213,7 +217,7 @@ These are known limitations of the preview. There are fixes planned for upcoming
 - imzML, Analyze 7.5, and CSV/tabular formats
 - Multi-file upload: import several datasets in one action with auto-grouping of paired files
 - Bulk/folder import: scan a server-side folder (recursively if desired) and import every detected dataset group with one click
-- File-backed (shared memory) mode for large imzML datasets that exceed available RAM
+- File-backed (shared memory) mode for large imzML datasets that exceed available RAM; the dataset stays file-backed through analysis, spatial, and export operations
 - Configurable mass range and resolution filtering on import
 - 10 GB maximum upload size for large datasets
 

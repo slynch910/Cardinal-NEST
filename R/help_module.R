@@ -1,4 +1,4 @@
-# Cardinal NEST - help module: log viewer and vignette browser
+# Cardinal NEST - help module: log viewer, operation record, vignettes
 
 # Remove a leading YAML frontmatter block, if present.
 strip_yaml_frontmatter <- function(lines) {
@@ -75,6 +75,18 @@ helpUI <- function(id) {
           "session are captured here in real time."),
         verbatimTextOutput(ns("log"), placeholder = TRUE)
       ),
+      bslib::nav_panel("Operation record",
+        p(class = "text-muted small",
+          "Chronological record of every operation in this session: imports, ",
+          "dataset creation, analyses, and exports, with the dataset each ran ",
+          "on, its parameters, and the resolved seed."),
+        div(class = "d-flex gap-2 mb-2",
+            downloadButton(ns("oplog_json"), "Download JSON",
+                           class = "btn-sm btn-outline-primary"),
+            downloadButton(ns("oplog_txt"), "Download text",
+                           class = "btn-sm btn-outline-secondary")),
+        DT::DTOutput(ns("oplog_table"))
+      ),
       bslib::nav_panel("Vignette",
         p(class = "text-muted small",
           "Select a vignette to view the user guide inside the app."),
@@ -86,8 +98,30 @@ helpUI <- function(id) {
 }
 
 helpServer <- function(id, log_path,
-                       vignette_dir = tutorials_dir()) {
+                       vignette_dir = tutorials_dir(),
+                       op_log = reactive(list())) {
   moduleServer(id, function(input, output, session) {
+    output$oplog_table <- DT::renderDT({
+      DT::datatable(oplog_table(op_log()), rownames = FALSE,
+                    options = list(pageLength = 25, order = list(),
+                                   scrollX = TRUE))
+    })
+
+    oplog_filename <- function(ext) {
+      function() paste0("cardinalnest_operation_record_",
+                        format(Sys.time(), "%Y%m%d_%H%M%S"), ".", ext)
+    }
+
+    output$oplog_json <- downloadHandler(
+      filename = oplog_filename("json"),
+      content = function(file) writeLines(oplog_json(op_log()), file)
+    )
+
+    output$oplog_txt <- downloadHandler(
+      filename = oplog_filename("txt"),
+      content = function(file) writeLines(oplog_text(op_log()), file)
+    )
+
     log_lines <- reactivePoll(
       intervalMillis = 1000,
       session = session,

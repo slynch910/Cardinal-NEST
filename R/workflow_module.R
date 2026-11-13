@@ -150,8 +150,14 @@ run_batch_preprocessing <- function(datasets, ids, specs, progress = NULL) {
       next
     }
 
-    run <- tryCatch(run_preproc_pipeline(rec$data, specs),
-                    error = function(e) e)
+    keep_fb <- is_file_backed(rec$data)
+    run <- tryCatch({
+      out <- run_preproc_pipeline(
+        rec$data, specs,
+        outfile = if (keep_fb) nest_store_file("batch") else NULL)
+      if (keep_fb) out$data <- keep_file_backed(out$data, rec$data, "batch")
+      out
+    }, error = function(e) e)
     if (inherits(run, "error")) {
       status <- rbind(status, data.frame(
         id = id, name = nm, status = "failed", new_id = NA_character_,
@@ -161,8 +167,12 @@ run_batch_preprocessing <- function(datasets, ids, specs, progress = NULL) {
 
     new_id <- next_dataset_id(c(names(datasets), names(new_records)))
     new_name <- paste0(nm, " [wf]")
-    record <- make_preproc_record(run$data, new_id, step_labels,
-                                  filename = new_name)
+    record <- make_preproc_record(
+      run$data, new_id, step_labels,
+      filename = new_name,
+      provenance = new_provenance(
+        "batch_preprocess", parent = rec,
+        params = list(steps = specs)))
     new_records[[new_id]] <- record
 
     detail <- sprintf("%d step(s)", length(specs))
@@ -307,25 +317,31 @@ workflowServer <- function(id, datasets, active_id, preproc_specs = reactive(lis
                          choices = choices, selected = names(ds))
     })
 
+    wf_filename <- function(ext) {
+      nm <- input$wf_name
+      if (is.null(nm) || !nzchar(nm)) nm <- "workflow"
+      paste0(gsub("[^A-Za-z0-9_-]+", "_", nm), ext)
+    }
+
     output$wf_save <- downloadHandler(
-      filename = function() {
-        nm <- input$wf_name
-        if (is.null(nm) || !nzchar(nm)) nm <- "workflow"
-        paste0(gsub("[^A-Za-z0-9_-]+", "_", nm), ".json")
-      },
+      filename = function() wf_filename(".json"),
       content = function(file) {
         writeLines(serialize_workflow(active_specs(), name = input$wf_name), file)
+        log_export_event("export_workflow", wf_filename(".json"), "json",
+                         params = list(name = input$wf_name,
+                                       steps = active_specs()),
+                         session = session)
       }
     )
 
     output$wf_script <- downloadHandler(
-      filename = function() {
-        nm <- input$wf_name
-        if (is.null(nm) || !nzchar(nm)) nm <- "workflow"
-        paste0(gsub("[^A-Za-z0-9_-]+", "_", nm), ".R")
-      },
+      filename = function() wf_filename(".R"),
       content = function(file) {
         writeLines(workflow_to_rscript(active_specs()), file)
+        log_export_event("export_rscript", wf_filename(".R"), "R",
+                         params = list(name = input$wf_name,
+                                       steps = active_specs()),
+                         session = session)
       }
     )
 

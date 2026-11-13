@@ -65,13 +65,11 @@ metadataUI <- function(id) {
     fluidRow(
       column(12,
         bslib::card(
-          bslib::card_header("Memory Management"),
+          bslib::card_header("Storage"),
           bslib::card_body(
-          p("View the active dataset's storage mode and load file-backed data into memory for faster access."),
+          p("The active dataset's storage mode. Convert to in-memory from the Performance tab."),
           
-          uiOutput(ns("memory_status")),
-          
-          uiOutput(ns("load_memory_ui"))
+          uiOutput(ns("memory_status"))
           )
         )
       )
@@ -213,37 +211,9 @@ metadataServer <- function(id, datasets, active_id) {
             "Data is stored on disk for memory efficiency")
       } else {
         div(class = "alert alert-success", 
-            strong("Status: In-memory"), br(),
+            strong(paste("Status:", storage_label(data))), br(),
             "Data is loaded into RAM for fast access")
       }
-    })
-
-    # Only offer the load button while the dataset is still file-backed.
-    output$load_memory_ui <- renderUI({
-      data <- mse_data()
-      if (is.null(data) || !isTRUE(is_file_backed(data))) return(NULL)
-      actionButton(session$ns("load_memory"), "Load into Memory", class = "btn-primary")
-    })
-
-    observeEvent(input$load_memory, {
-      ds <- datasets()
-      aid <- active_id()
-      if (is.null(aid) || is.null(ds[[aid]])) {
-        showNotification("No data loaded", type = "error")
-        return()
-      }
-      
-      tryCatch({
-        data_in_memory <- withProgress(
-          message = "Loading dataset into memory", value = 0.2,
-          ensure_in_memory(ds[[aid]]$data)
-        )
-        ds[[aid]]$data <- data_in_memory
-        datasets(ds)
-        showNotification("Data loaded into memory", type = "message")
-      }, error = function(e) {
-        showNotification(paste("Failed to load into memory:", e$message), type = "error")
-      })
     })
   })
 }

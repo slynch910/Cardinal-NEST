@@ -742,6 +742,10 @@ visualizationServer <- function(id, datasets, active_id) {
         render_collection_file(fig, file, device = "png",
                                width = 500 * dims$ncol,
                                height = 400 * dims$nrow)
+        log_export_event("export_figure", paste0("figure_", Sys.Date(), ".png"),
+                         "png", dataset = datasets()[[active_id() %||% ""]],
+                         params = list(panels = length(plot_collection())),
+                         session = session)
       }
     )
 
@@ -754,6 +758,10 @@ visualizationServer <- function(id, datasets, active_id) {
         render_collection_file(fig, file, device = "pdf",
                                width = 500 * dims$ncol,
                                height = 400 * dims$nrow)
+        log_export_event("export_figure", paste0("figure_", Sys.Date(), ".pdf"),
+                         "pdf", dataset = datasets()[[active_id() %||% ""]],
+                         params = list(panels = length(plot_collection())),
+                         session = session)
       }
     )
 

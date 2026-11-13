@@ -11,22 +11,28 @@ summarize_msi <- function(data) {
   )
 }
 
-# Must match export_metadata_suffix in the export module.
+# Legacy sidecar, still read; must match export_metadata_suffix.
 import_metadata_suffix <- ".metadata.csv"
 
-# Regex matching a metadata sidecar file name.
 import_metadata_pattern <- "\\.metadata\\.csv$"
 
-# Group files into datasets: one per file (csv/rds) or per shared base name
-# (imzML primary = .imzML, analyze primary = .hdr). A *.metadata.csv sidecar
-# attaches to its base-name group for pixelData restoration.
-import_group_files <- function(file_names, format) {
-  is_sidecar <- grepl(import_metadata_pattern, file_names, ignore.case = TRUE)
-  sidecars <- file_names[is_sidecar]
-  sidecar_bases <- sub(import_metadata_pattern, "", sidecars, ignore.case = TRUE)
-  data_files <- file_names[!is_sidecar]
+# Sidecars attach to the dataset sharing their base name, never standalone.
+import_native_sidecar_pattern <- "\\.(pdata|fdata|metadata|provenance\\.json)$"
 
-  # Attach the sidecar whose base matches this group's base (if any).
+# Group files into datasets: one per file (csv/rds) or per shared base name
+# (imzML primary = .imzML, analyze primary = .hdr). Sidecars join their
+# base-name group; `metadata` holds a legacy *.metadata.csv, if any.
+import_group_files <- function(file_names, format) {
+  is_legacy <- grepl(import_metadata_pattern, file_names, ignore.case = TRUE)
+  is_native <- grepl(import_native_sidecar_pattern, file_names, ignore.case = TRUE)
+  sidecars <- file_names[is_legacy]
+  sidecar_bases <- sub(import_metadata_pattern, "", sidecars, ignore.case = TRUE)
+  natives <- file_names[is_native]
+  native_bases <- sub(import_native_sidecar_pattern, "", natives,
+                      ignore.case = TRUE)
+  data_files <- file_names[!(is_legacy | is_native)]
+
+  # Attach the sidecars whose base matches this group's base (if any).
   attach_sidecar <- function(group) {
     i <- which(sidecar_bases == group$base)
     if (length(i) >= 1) {
@@ -34,6 +40,10 @@ import_group_files <- function(file_names, format) {
       group$files <- c(group$files, sidecars[i[1]])
     } else {
       group$metadata <- NULL
+    }
+    j <- which(native_bases == group$base)
+    if (length(j) >= 1) {
+      group$files <- c(group$files, natives[j])
     }
     group
   }
@@ -64,7 +74,76 @@ import_group_files <- function(file_names, format) {
   })
 }
 
-# Restore added pixelData columns from a metadata sidecar CSV, matching rows
+# write.table() defaults; header = TRUE absorbs the row-name column.
+read_native_table <- function(path) {
+  tryCatch(utils::read.table(path, header = TRUE, stringsAsFactors = FALSE,
+                             check.names = FALSE),
+           error = function(e) NULL)
+}
+
+# Rows matched on x/y/z when unique, else positionally when counts agree;
+# `run` restored as a factor like Cardinal's .read_pixelData.
+apply_native_pdata <- function(object, path) {
+  if (is.null(path) || !file.exists(path)) return(object)
+  tab <- read_native_table(path)
+  if (!is.data.frame(tab) || nrow(tab) == 0 || ncol(tab) == 0) return(object)
+
+  pd <- as.data.frame(Cardinal::pData(object))
+  n <- nrow(pd)
+  coord_cols <- intersect(c("x", "y", "z"), intersect(names(tab), names(pd)))
+
+  order_idx <- NULL
+  if (length(coord_cols) >= 2 && nrow(tab) >= n) {
+    key_obj <- do.call(paste, c(lapply(coord_cols, function(cc) as.character(pd[[cc]])),
+                                sep = "\r"))
+    key_tab <- do.call(paste, c(lapply(coord_cols, function(cc) as.character(tab[[cc]])),
+                                sep = "\r"))
+    m <- match(key_obj, key_tab)
+    if (!anyNA(m) && !anyDuplicated(m)) order_idx <- m
+  }
+  if (is.null(order_idx) && nrow(tab) == n) order_idx <- seq_len(n)
+  if (is.null(order_idx)) return(object)
+
+  for (col in setdiff(names(tab), coord_cols)) {
+    val <- tab[[col]][order_idx]
+    if (identical(col, "run")) val <- factor(val)
+    Cardinal::pData(object)[[col]] <- val
+  }
+  object
+}
+
+# Positional, like Cardinal's .read_featureData; requires matching row count.
+apply_native_fdata <- function(object, path) {
+  if (is.null(path) || !file.exists(path)) return(object)
+  tab <- read_native_table(path)
+  if (!is.data.frame(tab) || ncol(tab) == 0 || nrow(tab) != nrow(object)) {
+    return(object)
+  }
+  for (col in names(tab)) {
+    Cardinal::fData(object)[[col]] <- tab[[col]]
+  }
+  object
+}
+
+# .metadata is a dput() dump of the S4Vectors metadata list.
+apply_native_metadata <- function(object, path) {
+  if (is.null(path) || !file.exists(path)) return(object)
+  md <- tryCatch(dget(path), error = function(e) NULL)
+  if (is.list(md)) S4Vectors::metadata(object) <- md
+  object
+}
+
+# readImzML handles these itself; needed for Analyze 7.5 and CSV only.
+apply_native_sidecars <- function(object, primary_path) {
+  stem <- file.path(dirname(primary_path),
+                    tools::file_path_sans_ext(basename(primary_path)))
+  object <- apply_native_pdata(object, paste0(stem, ".pdata"))
+  object <- apply_native_fdata(object, paste0(stem, ".fdata"))
+  object <- apply_native_metadata(object, paste0(stem, ".metadata"))
+  object
+}
+
+# Restore added pixelData columns from a legacy sidecar CSV, matching rows
 # by x/y/z/run (positional fallback when row counts agree).
 apply_metadata_sidecar <- function(object, sidecar_path) {
   if (is.null(sidecar_path) || !file.exists(sidecar_path)) return(object)
@@ -238,15 +317,17 @@ read_rds_msi <- function(path) {
   obj
 }
 
-# Read an imzML with memory mode, mass-range, and resolution options.
+# memory: "memory" | "file" | "shared" -> Cardinal memory = TRUE/FALSE/"shared".
 read_imzml <- function(path, memory = "memory", mass_range = NULL,
                        resolution = NULL, units = c("ppm", "mz")) {
   if (!file.exists(path)) {
     stop(sprintf("File not found: %s", path), call. = FALSE)
   }
   units <- match.arg(units)
-  memory <- match.arg(memory, c("memory", "shared"))
-  params <- list(file = path, memory = memory)
+  memory <- match.arg(memory, c("memory", "file", "shared"))
+  params <- list(file = path,
+                 memory = switch(memory, memory = TRUE, file = FALSE,
+                                 shared = "shared"))
   if (!is.null(mass_range) && !all(is.na(mass_range))) {
     if (length(mass_range) != 2 || anyNA(mass_range)) {
       stop("mass_range must be a length-2 numeric vector c(min, max).",
@@ -320,9 +401,42 @@ list_import_files <- function(dir, format, recursive = FALSE) {
   keep <- exts %in% allowed
   # Also surface metadata sidecars (rds is self-contained, skips them).
   if (!identical(format, "rds")) {
-    keep <- keep | grepl(import_metadata_pattern, all_files, ignore.case = TRUE)
+    keep <- keep |
+      grepl(import_metadata_pattern, all_files, ignore.case = TRUE) |
+      grepl(import_native_sidecar_pattern, all_files, ignore.case = TRUE)
   }
   all_files[keep]
+}
+
+# Provenance embedded by a NEST .rds export is kept as prior_provenance.
+make_import_record <- function(data, id, group, format, summary,
+                               imzml_opts = NULL) {
+  exts <- paste(unique(tolower(tools::file_ext(group$files))), collapse = ", ")
+
+  params <- list(files = group$files)
+  if (identical(format, "imzML") && !is.null(imzml_opts)) {
+    params <- c(params, imzml_opts)
+  }
+  embedded <- tryCatch(S4Vectors::metadata(data)$cardinal_nest,
+                       error = function(e) NULL)
+  if (!is.null(embedded)) params$prior_provenance <- embedded
+
+  created <- Sys.time()
+  list(
+    id = id,
+    name = group$base,
+    format = format,
+    files = paste(group$files, collapse = ", "),
+    extensions = exts,
+    imported_at = created,
+    summary = summary,
+    data = data,
+    provenance = new_provenance("import", method = format, params = params),
+    source = list(format = format, files = group$files, extensions = exts),
+    created_at = created,
+    storage = spectra_storage(data),
+    revision = 1L
+  )
 }
 
 dataImportUI <- function(id) {
@@ -381,9 +495,10 @@ dataImportUI <- function(id) {
             condition = sprintf("input['%s'] == 'imzML'", ns("format")),
             selectInput(ns("memory_mode"), "Memory mode",
                        choices = c("In-memory (faster)" = "memory",
-                                   "File-backed (lower memory)" = "shared"),
+                                   "File-backed (lower memory)" = "file",
+                                   "Shared memory" = "shared"),
                        selected = "memory"),
-            helpText("File-backed mode keeps spectra on disk, using less RAM but slower access. Recommended for datasets larger than available memory."),
+            helpText("File-backed mode keeps spectra on disk, using less RAM but slower access. Recommended for datasets larger than available memory. Shared memory loads spectra into RAM shared with parallel workers."),
             
             numericInput(ns("mass_min"), "Minimum m/z",
                         value = NA, min = 0, step = 0.1),
@@ -504,8 +619,6 @@ dataImportUI <- function(id) {
 
 dataImportServer <- function(id, datasets, active_id, perf_log = NULL) {
   moduleServer(id, function(input, output, session) {
-    
-
     # File-backed datasets keep a live handle to their backing files; remove
     # per-import temp dirs only when the session ends.
     import_temp_dirs <- character(0)
@@ -553,7 +666,8 @@ dataImportServer <- function(id, datasets, active_id, perf_log = NULL) {
       # Metadata sidecars are not datasets; exclude from pairing validation.
       files <- input$file
       all_names <- files$name
-      is_sidecar <- grepl(import_metadata_pattern, all_names, ignore.case = TRUE)
+      is_sidecar <- grepl(import_metadata_pattern, all_names, ignore.case = TRUE) |
+        grepl(import_native_sidecar_pattern, all_names, ignore.case = TRUE)
       file_names <- all_names[!is_sidecar]
       file_exts <- tools::file_ext(file_names)
       file_bases <- tools::file_path_sans_ext(file_names)
@@ -678,7 +792,9 @@ dataImportServer <- function(id, datasets, active_id, perf_log = NULL) {
         Cardinal::readMSIData(file.path(temp_dir, group$primary))
       }
 
-      # Restore added pixelData columns from a matching sidecar, if any.
+      if (format %in% c("analyze", "csv")) {
+        data <- apply_native_sidecars(data, file.path(temp_dir, group$primary))
+      }
       if (!is.null(group$metadata)) {
         data <- apply_metadata_sidecar(data, file.path(temp_dir, group$metadata))
       }
@@ -708,25 +824,16 @@ dataImportServer <- function(id, datasets, active_id, perf_log = NULL) {
                       detail = sprintf("Reading (%d/%d) %s", gi, n, group$base))
 
           tryCatch({
-            data <- read_group(group, source_dir, fmt,
-                               imzml_opts = imzml_import_opts())
+            opts <- imzml_import_opts()
+            data <- read_group(group, source_dir, fmt, imzml_opts = opts)
             summary <- summarize_msi(data)
 
             # Id unique across the store, incl. save-flow datasets.
             new_id <- next_dataset_id(names(datasets()))
             dataset_counter(dataset_counter() + 1)
 
-            record <- list(
-              id = new_id,
-              name = group$base,
-              format = fmt,
-              files = paste(group$files, collapse = ", "),
-              extensions = paste(unique(tolower(tools::file_ext(group$files))),
-                                 collapse = ", "),
-              imported_at = Sys.time(),
-              summary = summary,
-              data = data
-            )
+            record <- make_import_record(data, new_id, group, fmt, summary,
+                                         imzml_opts = opts)
 
             current <- datasets()
             current[[new_id]] <- record
@@ -877,7 +984,8 @@ dataImportServer <- function(id, datasets, active_id, perf_log = NULL) {
       data <- ds[[id]]$data
 
       mzv <- Cardinal::mz(data)
-      mean_int <- rowMeans(as.matrix(Cardinal::spectra(data)), na.rm = TRUE)
+      mean_int <- Cardinal::fData(
+        Cardinal::summarizeFeatures(data, stat = "mean", verbose = FALSE))[["mean"]]
       plot(mzv, mean_int, type = "l",
            xlab = "m/z", ylab = "Mean intensity",
            main = "Mean spectrum")

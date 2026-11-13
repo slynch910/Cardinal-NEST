@@ -31,8 +31,11 @@ Imports:
     gridExtra,
     gridGraphics,
     jsonlite,
+    matter,
     methods,
     ProtGenerics,
+    ps,
+    S4Vectors,
     scales,
     shiny (>= 1.7.0),
     shinycssloaders,
@@ -41,6 +44,7 @@ Imports:
     stats,
     tools,
     utils,
+    withr,
     zip
 Encoding: UTF-8
 Config/roxygen2/version: 8.1.0

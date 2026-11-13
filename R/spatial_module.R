@@ -6,7 +6,8 @@
 # k = initial segment count, s = shrinkage, weights = "gaussian"|"adaptive".
 # `segment` is per-pixel; `statistic` is feature x segment t-statistics.
 run_spatial_segmentation <- function(data, r = 1, k = 3, s = 0,
-                                      weights = c("gaussian", "adaptive")) {
+                                      weights = c("gaussian", "adaptive"),
+                                      seed = NULL) {
   if (is.null(data)) stop("No dataset supplied for segmentation.", call. = FALSE)
   weights <- match.arg(weights)
 
@@ -23,8 +24,8 @@ run_spatial_segmentation <- function(data, r = 1, k = 3, s = 0,
   r <- as.numeric(r)
   s <- as.numeric(s)
 
-  model <- Cardinal::spatialShrunkenCentroids(data, r = r, k = k, s = s,
-                                              weights = weights)
+  model <- with_nest_seed(seed, Cardinal::spatialShrunkenCentroids(
+    data, r = r, k = k, s = s, weights = weights))
 
   segment <- as.factor(model$class)
   segment <- factor(segment, levels = sort(unique(as.character(segment))))
@@ -40,7 +41,8 @@ run_spatial_segmentation <- function(data, r = 1, k = 3, s = 0,
     sizes = table(segment),
     coord = as.data.frame(Cardinal::coord(data)),
     statistic = model$statistic,
-    mz = Cardinal::mz(data)
+    mz = Cardinal::mz(data),
+    seed = seed
   )
 }
 
@@ -81,10 +83,18 @@ plot_segmentation <- function(seg) {
 }
 
 # Dataset record with the segments as pixelData column spatial_segment.
-make_segmentation_record <- function(data, seg, id, filename = NULL, ext = NULL) {
+make_segmentation_record <- function(data, seg, id, parent = NULL,
+                                     filename = NULL, ext = NULL) {
   make_result_record(data, list(spatial_segment = seg$segment), id,
-                     sprintf("Spatial segmentation (%d segments)", seg$n_segments),
-                     filename = filename, ext = ext)
+                     sprintf("Spatial segmentation (%d segments)%s", seg$n_segments,
+                             seed_label(seg$seed)),
+                     filename = filename, ext = ext,
+                     provenance = new_provenance(
+                       "save_segments", parent = parent,
+                       method = "spatialShrunkenCentroids",
+                       params = list(r = seg$r, k = seg$k, s = seg$s,
+                                     weights = seg$weights),
+                       seed = seg$seed))
 }
 
 # Per-pixel class for `feature`; model$class may be a list, matrix, or
@@ -108,7 +118,8 @@ dgmm_feature_class <- function(model, feature = 1) {
 # Cardinal::spatialDGMM wrapper; DGMM fits one mixture per feature so a
 # single 1-based `feature` is chosen for the per-pixel segment map.
 run_spatial_dgmm <- function(data, r = 1, k = 3, feature = 1,
-                             weights = c("gaussian", "adaptive")) {
+                             weights = c("gaussian", "adaptive"),
+                             seed = NULL) {
   if (is.null(data)) stop("No dataset supplied for spatial-DGMM.", call. = FALSE)
   weights <- match.arg(weights)
 
@@ -127,7 +138,8 @@ run_spatial_dgmm <- function(data, r = 1, k = 3, feature = 1,
   if (is.na(feature) || feature < 1) feature <- 1L
   feature <- min(feature, n_feat)
 
-  model <- Cardinal::spatialDGMM(data, r = r, k = k, weights = weights)
+  model <- with_nest_seed(seed, Cardinal::spatialDGMM(data, r = r, k = k,
+                                                      weights = weights))
 
   segment <- dgmm_feature_class(model, feature)
   keep <- as.character(segment[!is.na(segment)])
@@ -146,7 +158,8 @@ run_spatial_dgmm <- function(data, r = 1, k = 3, feature = 1,
     segment = segment,
     n_segments = nlevels(segment),
     sizes = table(segment),
-    coord = as.data.frame(Cardinal::coord(data))
+    coord = as.data.frame(Cardinal::coord(data)),
+    seed = seed
   )
 }
 
@@ -162,11 +175,20 @@ plot_dgmm <- function(dgmm) {
 }
 
 # Dataset record with the DGMM segments as pixelData column dgmm_segment.
-make_dgmm_record <- function(data, dgmm, id, filename = NULL, ext = NULL) {
+make_dgmm_record <- function(data, dgmm, id, parent = NULL,
+                             filename = NULL, ext = NULL) {
   mz_lab <- if (is.na(dgmm$mz)) sprintf("feature %d", dgmm$feature) else sprintf("m/z %.4g", dgmm$mz)
   make_result_record(data, list(dgmm_segment = dgmm$segment), id,
-                     sprintf("Spatial-DGMM (%s, %d segments)", mz_lab, dgmm$n_segments),
-                     filename = filename, ext = ext)
+                     sprintf("Spatial-DGMM (%s, %d segments)%s", mz_lab, dgmm$n_segments,
+                             seed_label(dgmm$seed)),
+                     filename = filename, ext = ext,
+                     provenance = new_provenance(
+                       "save_segments", parent = parent,
+                       method = "spatialDGMM",
+                       params = list(r = dgmm$r, k = dgmm$k,
+                                     weights = dgmm$weights,
+                                     feature = dgmm$feature, mz = dgmm$mz),
+                       seed = dgmm$seed))
 }
 
 # Logical vector: pixels inside the brush rectangle.
@@ -255,14 +277,19 @@ plot_roi <- function(coord, selected = NULL, roi_name = "roi", poly = NULL) {
 }
 
 # Dataset record with ROI membership as a pixelData column (default "roi").
-make_roi_record <- function(data, selected, id, roi_name = "roi",
+make_roi_record <- function(data, selected, id, parent = NULL,
+                            roi_name = "roi",
                             column = NULL, filename = NULL, ext = NULL) {
   coord <- as.data.frame(Cardinal::coord(data))
   labels <- make_roi_labels(coord, selected, roi_name)
   column <- if (is.null(column) || !nzchar(column)) "roi" else column
   make_result_record(data, stats::setNames(list(labels), column), id,
                      sprintf("ROI '%s' (%d pixels)", roi_name, sum(labels == roi_name)),
-                     filename = filename, ext = ext)
+                     filename = filename, ext = ext,
+                     provenance = new_provenance(
+                       "save_roi", parent = parent, method = NULL,
+                       params = list(roi_name = roi_name, column = column,
+                                     n_selected = sum(labels == roi_name))))
 }
 
 spatialUI <- function(id) {
@@ -302,6 +329,7 @@ spatialUI <- function(id) {
                 selectInput(ns("seg_weights"), "Spatial weights",
                             choices = c("Gaussian" = "gaussian",
                                         "Adaptive" = "adaptive")),
+                seed_input(ns, "seg_seed"),
 
                 actionButton(ns("run_segmentation"), "Run segmentation",
                              icon = icon("play"), class = "btn-success w-100")
@@ -368,6 +396,7 @@ spatialUI <- function(id) {
                 selectInput(ns("dgmm_weights"), "Spatial weights",
                             choices = c("Gaussian" = "gaussian",
                                         "Adaptive" = "adaptive")),
+                seed_input(ns, "dgmm_seed"),
                 div(class = "text-muted small mb-2",
                     "spatial-DGMM fits one model per feature and can be slow on ",
                     "large datasets."),
@@ -501,10 +530,16 @@ spatialServer <- function(id, datasets, active_id) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    # Global seed comes via session$userData to keep the module signature.
+    global_seed <- function() session_global_seed(session$userData$perf_state)
+
+    observe_seed_generators(input, session, c("seg_seed", "dgmm_seed"))
+
     mse_data <- active_dataset(datasets, active_id)
 
     status <- reactiveVal(list(type = "info", message = "No segmentation run yet."))
     result <- reactiveVal(NULL)  # list(seg, table, plot_fn)
+    observe_result_log(result, datasets, "spatial")
 
     output$active_dataset <- active_dataset_ui(datasets, active_id)
 
@@ -523,11 +558,10 @@ spatialServer <- function(id, datasets, active_id) {
         return()
       }
 
-      # Cardinal's spatial engines fail on file-backed storage; materialize
-      # into memory first (missing values imputed with 0).
+      # Runs on stored spectra; an in-memory copy is made only to impute NAs.
       data <- tryCatch(
-        with_progress_stages("Loading spectra into memory",
-                     ensure_in_memory(data)),
+        with_progress_stages("Checking spectra for missing values",
+                     prepare_analysis_data(data, on_warn = notify_memory_warning)),
         error = function(e) {
           status(list(type = "danger",
                       message = sprintf("Could not load spectra into memory: %s",
@@ -537,6 +571,7 @@ spatialServer <- function(id, datasets, active_id) {
       )
       if (is.null(data)) return()
 
+      seed <- resolve_seed(input$seg_seed, global_seed())
       seg <- with_progress_stages("Running spatial segmentation", {
         tryCatch(
           run_spatial_segmentation(
@@ -544,7 +579,8 @@ spatialServer <- function(id, datasets, active_id) {
             r = if (is.null(input$seg_r)) 1 else input$seg_r,
             k = input$seg_k,
             s = if (is.null(input$seg_s)) 0 else input$seg_s,
-            weights = if (is.null(input$seg_weights)) "gaussian" else input$seg_weights
+            weights = if (is.null(input$seg_weights)) "gaussian" else input$seg_weights,
+            seed = seed
           ),
           error = function(e) {
             status(list(type = "danger", message = conditionMessage(e)))
@@ -558,12 +594,19 @@ spatialServer <- function(id, datasets, active_id) {
         kind = "segmentation",
         seg = seg,
         table = segmentation_top_features(seg, n = 50),
-        plot_fn = function() plot_segmentation(seg)
+        plot_fn = function() plot_segmentation(seg),
+        provenance = new_provenance(
+          "segmentation", parent = datasets()[[active_id()]],
+          method = "spatialShrunkenCentroids",
+          params = list(r = seg$r, k = seg$k, s = seg$s,
+                        weights = seg$weights),
+          seed = seg$seed)
       ))
       status(list(type = "success",
-                  message = sprintf("Segmentation complete: %d segments over %d pixels (sizes: %s).",
+                  message = sprintf("Segmentation complete: %d segments over %d pixels (sizes: %s)%s.",
                                     seg$n_segments, length(seg$segment),
-                                    paste(as.integer(seg$sizes), collapse = ", "))))
+                                    paste(as.integer(seg$sizes), collapse = ", "),
+                                    seed_label(seg$seed))))
     })
 
     output$result_plot <- renderPlot({
@@ -608,6 +651,7 @@ spatialServer <- function(id, datasets, active_id) {
       new_id <- next_dataset_id(names(ds))
       record <- tryCatch(
         make_segmentation_record(data, res$seg, new_id,
+                                 parent = ds[[active_id()]],
                                  filename = input$save_filename, ext = input$save_ext),
         error = function(e) {
           status(list(type = "danger", message = conditionMessage(e)))
@@ -622,22 +666,27 @@ spatialServer <- function(id, datasets, active_id) {
                   message = sprintf("Segments saved as '%s'.", record$name)))
     })
 
+    seg_csv_filename <- function() {
+      paste0("spatial_segments", seed_tag(result()$seg$seed), "_",
+             format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    }
     output$export_csv <- downloadHandler(
-      filename = function() {
-        paste0("spatial_segments_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
-      },
+      filename = seg_csv_filename,
       content = function(file) {
         res <- result()
         if (is.null(res)) {
           utils::write.csv(data.frame(), file, row.names = FALSE)
         } else {
           utils::write.csv(segmentation_pixel_table(res$seg), file, row.names = FALSE)
+          log_export_event("export_table", seg_csv_filename(), "csv",
+                           provenance = res$provenance, session = session)
         }
       }
     )
 
     output$export_plot <- export_plot_handler(
-      result, function() input$plot_format, "spatial_segmentation",
+      result, function() input$plot_format,
+      function() paste0("spatial_segmentation", seed_tag(result()$seg$seed)),
       empty_msg = "No segmentation result to export.")
 
     output$status <- render_status(status)
@@ -645,6 +694,7 @@ spatialServer <- function(id, datasets, active_id) {
     dgmm_status <- reactiveVal(list(type = "info",
                                     message = "No spatial-DGMM run yet."))
     dgmm_result <- reactiveVal(NULL)  # list(dgmm, table, plot_fn)
+    observe_result_log(dgmm_result, datasets, "spatial")
 
     observe({
       if (is.null(mse_data())) {
@@ -661,11 +711,10 @@ spatialServer <- function(id, datasets, active_id) {
         return()
       }
 
-      # spatialDGMM fails on file-backed storage (sparse gaps -> NA);
-      # materialize into memory first (missing values imputed with 0).
+      # Runs on stored spectra; an in-memory copy is made only to impute NAs.
       data <- tryCatch(
-        with_progress_stages("Loading spectra into memory",
-                     ensure_in_memory(data)),
+        with_progress_stages("Checking spectra for missing values",
+                     prepare_analysis_data(data, on_warn = notify_memory_warning)),
         error = function(e) {
           dgmm_status(list(type = "danger",
                            message = sprintf("Could not load spectra into memory: %s",
@@ -682,6 +731,7 @@ spatialServer <- function(id, datasets, active_id) {
         feature <- which.min(abs(mz - input$dgmm_mz))
       }
 
+      seed <- resolve_seed(input$dgmm_seed, global_seed())
       dgmm <- with_progress_stages("Running spatial-DGMM", {
         tryCatch(
           run_spatial_dgmm(
@@ -689,7 +739,8 @@ spatialServer <- function(id, datasets, active_id) {
             r = if (is.null(input$dgmm_r)) 1 else input$dgmm_r,
             k = input$dgmm_k,
             feature = feature,
-            weights = if (is.null(input$dgmm_weights)) "gaussian" else input$dgmm_weights
+            weights = if (is.null(input$dgmm_weights)) "gaussian" else input$dgmm_weights,
+            seed = seed
           ),
           error = function(e) {
             dgmm_status(list(type = "danger", message = conditionMessage(e)))
@@ -703,13 +754,20 @@ spatialServer <- function(id, datasets, active_id) {
         kind = "dgmm",
         dgmm = dgmm,
         table = dgmm_pixel_table(dgmm),
-        plot_fn = function() plot_dgmm(dgmm)
+        plot_fn = function() plot_dgmm(dgmm),
+        provenance = new_provenance(
+          "segmentation", parent = datasets()[[active_id()]],
+          method = "spatialDGMM",
+          params = list(r = dgmm$r, k = dgmm$k, weights = dgmm$weights,
+                        feature = dgmm$feature, mz = dgmm$mz),
+          seed = dgmm$seed)
       ))
       mz_lab <- if (is.na(dgmm$mz)) sprintf("feature %d", dgmm$feature) else sprintf("m/z %.4g", dgmm$mz)
       dgmm_status(list(type = "success",
-                       message = sprintf("Spatial-DGMM complete: %s segmented into %d components over %d pixels (sizes: %s).",
+                       message = sprintf("Spatial-DGMM complete: %s segmented into %d components over %d pixels (sizes: %s)%s.",
                                          mz_lab, dgmm$n_segments, length(dgmm$segment),
-                                         paste(as.integer(dgmm$sizes), collapse = ", "))))
+                                         paste(as.integer(dgmm$sizes), collapse = ", "),
+                                         seed_label(dgmm$seed))))
     })
 
     output$dgmm_plot <- renderPlot({
@@ -756,6 +814,7 @@ spatialServer <- function(id, datasets, active_id) {
       new_id <- next_dataset_id(names(ds))
       record <- tryCatch(
         make_dgmm_record(data, res$dgmm, new_id,
+                         parent = ds[[active_id()]],
                          filename = input$dgmm_save_filename, ext = input$dgmm_save_ext),
         error = function(e) {
           dgmm_status(list(type = "danger", message = conditionMessage(e)))
@@ -770,22 +829,27 @@ spatialServer <- function(id, datasets, active_id) {
                        message = sprintf("Segments saved as '%s'.", record$name)))
     })
 
+    dgmm_csv_filename <- function() {
+      paste0("dgmm_segments", seed_tag(dgmm_result()$dgmm$seed), "_",
+             format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    }
     output$dgmm_export_csv <- downloadHandler(
-      filename = function() {
-        paste0("dgmm_segments_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
-      },
+      filename = dgmm_csv_filename,
       content = function(file) {
         res <- dgmm_result()
         if (is.null(res)) {
           utils::write.csv(data.frame(), file, row.names = FALSE)
         } else {
           utils::write.csv(res$table, file, row.names = FALSE)
+          log_export_event("export_table", dgmm_csv_filename(), "csv",
+                           provenance = res$provenance, session = session)
         }
       }
     )
 
     output$dgmm_export_plot <- export_plot_handler(
-      dgmm_result, function() input$dgmm_plot_format, "dgmm_segmentation",
+      dgmm_result, function() input$dgmm_plot_format,
+      function() paste0("dgmm_segmentation", seed_tag(dgmm_result()$dgmm$seed)),
       empty_msg = "No spatial-DGMM result to export.")
 
     output$dgmm_status <- render_status(dgmm_status)
@@ -972,7 +1036,8 @@ spatialServer <- function(id, datasets, active_id) {
       ds <- datasets()
       new_id <- next_dataset_id(names(ds))
       record <- tryCatch(
-        make_roi_record(data, sel, new_id, roi_name = roi_name, column = roi_name,
+        make_roi_record(data, sel, new_id, parent = ds[[active_id()]],
+                        roi_name = roi_name, column = roi_name,
                         filename = input$roi_save_filename, ext = input$roi_save_ext),
         error = function(e) {
           roi_status(list(type = "danger", message = conditionMessage(e)))
@@ -987,10 +1052,11 @@ spatialServer <- function(id, datasets, active_id) {
                       message = sprintf("ROI saved as '%s'.", record$name)))
     })
 
+    roi_csv_filename <- function() {
+      paste0("roi_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    }
     output$roi_export_csv <- downloadHandler(
-      filename = function() {
-        paste0("roi_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
-      },
+      filename = roi_csv_filename,
       content = function(file) {
         coord <- roi_coord()
         sel <- roi_selected()
@@ -999,6 +1065,11 @@ spatialServer <- function(id, datasets, active_id) {
         } else {
           roi_name <- if (isTruthy(input$roi_name)) input$roi_name else "roi"
           utils::write.csv(roi_pixel_table(coord, sel, roi_name), file, row.names = FALSE)
+          log_export_event("export_roi", roi_csv_filename(), "csv",
+                           dataset = datasets()[[active_id() %||% ""]],
+                           params = list(roi_name = roi_name,
+                                         n_selected = sum(sel %in% TRUE)),
+                           session = session)
         }
       }
     )
