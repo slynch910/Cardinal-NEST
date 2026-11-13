@@ -1,8 +1,8 @@
 Package: CardinalNEST
 Type: Package
 Title: A Graphical User Interface for Cardinal 3
-Version: 0.2.0
-Date: 2026-10-14
+Version: 0.2.1
+Date: 2026-11-13
 Authors@R: 
     person(given = "Sean Vincent",
            family = "Lynch",
